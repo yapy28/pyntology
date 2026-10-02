@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pyntology — the onion</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="assets/colibri.png">
+<style>
+  :root {
+    --bg: #0d1418; --panel: rgba(13, 20, 24, 0.92); --line: #23323a;
+    --text: #c9d6dc; --muted: #7c8f99; --accent: #3ddc97;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg);
+               color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  canvas { display: block; }
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header img { width: 30px; height: 30px; filter: invert(1) brightness(1.2); }
+  header .title { font-size: 16px; font-weight: 600; }
+  header .title em { color: var(--accent); font-style: normal; }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  #tooltip {
+    position: fixed; z-index: 20; pointer-events: none; display: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 9px; font-size: 12.5px;
+  }
+  #panel {
+    position: fixed; top: 62px; right: 12px; width: 370px; max-height: calc(100vh - 84px);
+    overflow-y: auto; z-index: 10; display: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+  }
+  #panel.visible { display: block; }
+  #panel .kind { font-size: 11.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  #panel h2 { margin: 2px 0 8px; font-size: 17px; color: #fff; }
+  #panel .prov { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  #panel .desc { font-size: 13px; margin-bottom: 10px; }
+  #panel .section { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; font-size: 12.5px; }
+  #panel .section h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase;
+                       letter-spacing: 1px; color: var(--muted); }
+  #hint {
+    position: fixed; left: 12px; bottom: 12px; z-index: 10; color: var(--muted); font-size: 11.5px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+  }
+  #legend {
+    position: fixed; right: 12px; bottom: 12px; z-index: 10; font-size: 11.5px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px;
+    line-height: 1.8;
+  }
+  #legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="assets/colibri-outline.png" alt="Pyntology">
+  <div class="title">Pyntology <em>&mdash;</em> the onion</div>
+  <div class="sub">dedicated containment renderer &middot; store at the center, worlds within worlds</div>
+</header>
+<div id="tooltip"></div>
+<div id="panel"></div>
+<div id="hint">drag: orbit &middot; scroll: zoom &middot; click a node: inspect &middot; double-click: fly into it</div>
+<div id="legend"></div>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="onion-layout.js"></script>
+<script src="onion.js"></script>
+</body>
+</html>
