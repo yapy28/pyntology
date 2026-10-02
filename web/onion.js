@@ -90,6 +90,7 @@ const state = {
   flyTo: null,                // {x, y, z, dist} eased camera goal
   running: false, runCancel: false, runMarked: [],
   runVisited: new Set(),       // every node the replay has activated so far
+  runCameraManual: false,     // user touched the camera: stop stage flights
   dots: [],                  // traveling flow dots: {mesh, from, to, t0, dur}
   speed: 1,                  // playback rate for the run replay
   topView: false,            // locked top-down camera that follows the action
@@ -252,6 +253,8 @@ async function main() {
     drag = { x: e.clientX, y: e.clientY, moved: 0,
              pan: e.button === 2 || e.shiftKey };
     state.flyTo = null;
+    // during a run, any camera touch hands control back to the user
+    if (state.running) state.runCameraManual = true;
   });
   window.addEventListener('pointerup', () => { drag = null; });
   window.addEventListener('pointermove', (e) => {
@@ -283,6 +286,7 @@ async function main() {
   });
   dom.addEventListener('wheel', (e) => {
     state.flyTo = null;
+    if (state.running) state.runCameraManual = true;
     state.dist = Math.min(state.maxShell * 8,
       Math.max(25, state.dist * (1 + e.deltaY * 0.001)));
     e.preventDefault();
@@ -556,6 +560,7 @@ async function main() {
   async function runProgram() {
     state.running = true;
     state.runCancel = false;
+    state.runCameraManual = false;
     runBtn.textContent = 'Stop';
     runBtn.classList.add('running');
     clearSelection();
@@ -570,13 +575,17 @@ async function main() {
       await sleep((st.dur || 1.4) / state.speed);
     }
     // the run is over: unvisited nodes go back to normal, but the whole
-    // traversed path keeps a faint green glow until Esc
+    // traversed path stays clearly green-tinted until Esc
     stageEl.classList.remove('visible');
     for (const [nid, mesh] of state.nodeMeshes) {
       if (state.runMarked.includes(nid)) continue;
       mesh.material.color.copy(mesh.userData.baseColor);
-      mesh.material.emissive.setHex(
-        state.runVisited.has(nid) ? 0x155d3a : 0x11181c);
+      if (state.runVisited.has(nid)) {
+        mesh.material.color.lerp(new THREE.Color('#3ddc97'), 0.45);
+        mesh.material.emissive.setHex(0x155d3a);
+      } else {
+        mesh.material.emissive.setHex(0x11181c);
+      }
     }
     state.running = false;
     runBtn.textContent = 'Run';
@@ -584,10 +593,9 @@ async function main() {
   }
 
   function playStage(st) {
-    // camera glides to this stage's node - except in follow mode, where
-    // the whole graph stays in one top-down frame and the animation
-    // plays inside it instead of the camera chasing it
-    if (!state.topView) {
+    // camera glides to this stage's node - unless the user touched the
+    // camera during this run (manual override) or follow mode is on
+    if (!state.topView && !state.runCameraManual) {
       const p = pos.get(st.id);
       if (p) flyTo({ x: p.x, y: p.y, z: p.z, dist: Math.min(state.dist, 320) });
     }
@@ -605,7 +613,7 @@ async function main() {
       } else if (state.runVisited.has(nid)) {
         // the trail: touched by earlier stages, still colored
         mesh.material.color.copy(mesh.userData.baseColor)
-          .multiplyScalar(0.55);
+          .multiplyScalar(0.65);
       } else {
         mesh.material.color.set('#1c2b33');
       }
