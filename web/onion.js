@@ -317,8 +317,20 @@ async function main() {
     if (nodeHits.length) return { node: nodeHits[0].object.userData.node };
     const shellHits = raycaster.intersectObjects([...state.shellRims.values()], false);
     if (shellHits.length) {
-      const container = shellHits[0].object.userData.containerId;
-      return { node: state.byId.get(container), shell: shellHits[0].object };
+      // nested transparent spheres all lie along the click ray: the
+      // bubble the user is actually looking at is the innermost one
+      // whose entry surface the ray crosses, NOT the nearest surface
+      // (that is always the outermost bubble and made inner bubbles
+      // unclickable). One entry hit per bubble, deepest one wins.
+      const entryByShell = new Map();
+      for (const h of shellHits) {
+        const cid = h.object.userData.containerId;
+        if (!entryByShell.has(cid)) entryByShell.set(cid, h);
+      }
+      const intended = [...entryByShell.values()]
+        .sort((a, b) => b.distance - a.distance)[0];
+      const container = intended.object.userData.containerId;
+      return { node: state.byId.get(container), shell: intended.object };
     }
     return null;
   };
