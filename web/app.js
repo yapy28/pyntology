@@ -588,7 +588,7 @@ async function init() {
   state.fg = ForceGraph3D()(document.getElementById('graph'))
     .graphData({ nodes: data.nodes, links: data.links })
     .backgroundColor('#0d1418')
-    .nodeLabel((n) => `<div style="font-size:13px"><b>${escapeHtml(n.name)}</b><br>${n.kind}</div>`)
+    .nodeLabel((n) => `<div style="font-size:13px"><b>${escapeHtml(n.name)}</b><br>${kindLabel(n)}</div>`)
     .nodeVal((n) => (n.val || 0) + 1)
     .nodeRelSize(5)
     .nodeColor(nodeColor)

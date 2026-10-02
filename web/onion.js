@@ -359,7 +359,7 @@ async function main() {
       tooltip.style.display = 'block';
       tooltip.style.left = (e.clientX + 14) + 'px';
       tooltip.style.top = (e.clientY + 14) + 'px';
-      tooltip.innerHTML = `<b>${hit.node.name}</b> <span style="color:#7c8f99">${hit.node.kind}</span>`;
+      tooltip.innerHTML = `<b>${hit.node.name}</b> <span style="color:#7c8f99">${kindLabel(hit.node)}</span>`;
       dom.style.cursor = 'pointer';
     } else {
       tooltip.style.display = 'none';
