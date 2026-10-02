@@ -89,6 +89,7 @@ const state = {
   dist: 1000, theta: 0.7, phi: 1.15, maxShell: 600,
   flyTo: null,                // {x, y, z, dist} eased camera goal
   running: false, runCancel: false, runMarked: [],
+  runVisited: new Set(),       // every node the replay has activated so far
   dots: [],                  // traveling flow dots: {mesh, from, to, t0, dur}
   speed: 1,                  // playback rate for the run replay
   topView: false,            // locked top-down camera that follows the action
@@ -568,12 +569,14 @@ async function main() {
       playStage(st);
       await sleep((st.dur || 1.4) / state.speed);
     }
-    // restore normal colors; the green output marks stay until Esc
+    // the run is over: unvisited nodes go back to normal, but the whole
+    // traversed path keeps a faint green glow until Esc
     stageEl.classList.remove('visible');
     for (const [nid, mesh] of state.nodeMeshes) {
-      if (!state.runMarked.includes(nid)) {
-        mesh.material.color.copy(mesh.userData.baseColor);
-      }
+      if (state.runMarked.includes(nid)) continue;
+      mesh.material.color.copy(mesh.userData.baseColor);
+      mesh.material.emissive.setHex(
+        state.runVisited.has(nid) ? 0x155d3a : 0x11181c);
     }
     state.running = false;
     runBtn.textContent = 'Run';
@@ -588,12 +591,21 @@ async function main() {
       const p = pos.get(st.id);
       if (p) flyTo({ x: p.x, y: p.y, z: p.z, dist: Math.min(state.dist, 320) });
     }
-    // light the stage's cast, dim the rest of the world
+    // light the stage's cast, keep the traversed path lit behind it,
+    // dim only what the replay has not touched yet
     const cast = new Set([st.id, ...(st.glow || [])]);
+    for (const id of cast) {
+      if (state.nodeMeshes.has(id)) state.runVisited.add(id);
+    }
     for (const [nid, mesh] of state.nodeMeshes) {
+      if (state.runMarked.includes(nid)) continue;  // outputs stay green
       if (nid === st.id) mesh.material.color.set('#ffffff');
-      else if (cast.has(nid) && !state.runMarked.includes(nid)) {
+      else if (cast.has(nid)) {
         mesh.material.color.copy(mesh.userData.baseColor);
+      } else if (state.runVisited.has(nid)) {
+        // the trail: touched by earlier stages, still colored
+        mesh.material.color.copy(mesh.userData.baseColor)
+          .multiplyScalar(0.55);
       } else {
         mesh.material.color.set('#1c2b33');
       }
@@ -632,7 +644,8 @@ async function main() {
   }
 
   function clearRunMarks() {
-    for (const nid of state.runMarked) {
+    const touched = new Set([...state.runMarked, ...state.runVisited]);
+    for (const nid of touched) {
       const mesh = state.nodeMeshes.get(nid);
       if (mesh) {
         mesh.material.color.copy(mesh.userData.baseColor);
@@ -640,6 +653,7 @@ async function main() {
       }
     }
     state.runMarked = [];
+    state.runVisited = new Set();
   }
 
   function renderPanel(n) {
