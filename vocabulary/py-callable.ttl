@@ -1,0 +1,51 @@
+@prefix py:      <https://colibri.example/ns/py#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+<https://colibri.example/ns/py/callable> a owl:Ontology ;
+  dcterms:title "py-callable: callable contracts"@en ;
+  owl:imports <https://colibri.example/ns/py/core> ,
+              <https://colibri.example/ns/py/protocol> ;
+  rdfs:comment """Callables are objects with a contract: calling them produces a result
+or raises an exception, and the semantic condition of the exception is part
+of the contract, not an implementation detail. len raises TypeError when
+its argument does not satisfy the Sized protocol - that fact is as much a
+part of len as its return shape."""@en .
+
+py:Callable a rdfs:Class ;
+  rdfs:label "callable"@en ;
+  rdfs:comment "An object that can be called with a signature: builtin functions, plain functions, classes (calling a class creates an instance), methods."@en .
+
+py:calls a rdf:Property ;
+  rdfs:label "calls"@en ;
+  rdfs:comment "Relates a callable (or a module, at its entry point) to a callable it invokes. The static call structure of a file, extracted from the abstract syntax tree without executing anything."@en .
+
+py:raises a rdf:Property ;
+  rdfs:label "raises"@en ;
+  rdfs:comment "Part of a callable's contract: calling it can raise the related exception when its precondition fails. The exception is a semantic outcome, not an implementation detail."@en .
+
+py:raisesWhen a rdf:Property ;
+  rdfs:label "raises when"@en ;
+  rdfs:comment "The failure condition under which the related exception fires, as a concept from the python-conditions vocabulary - e.g. len raises TypeError when its argument is not sized."@en .
+
+py:precondition a rdf:Property ;
+  rdfs:label "requires"@en ;
+  rdfs:comment "The condition a callable's argument must satisfy for the call to succeed, as a concept from the python-conditions vocabulary."@en .
+
+py:signatureOf a rdf:Property ;
+  rdfs:label "signature of"@en ;
+  rdfs:comment "Relates a callable to its reified signature node (argument shapes, return shape, exception outcomes)."@en .
+
+py:hasArgument a rdf:Property ;
+  rdfs:label "has argument"@en ;
+  rdfs:comment "Relates a signature to one of its argument shapes."@en .
+
+py:returnsShape a rdf:Property ;
+  rdfs:label "returns shape"@en ;
+  rdfs:comment "The shape of the value a callable returns on the success path."@en .
+
+py:callCategory a rdf:Property ;
+  rdfs:label "call category"@en ;
+  rdfs:comment "What kind of callable this is, as a concept from the callable-categories vocabulary (pure-function, io-function, ...). A vocabulary-restricted attribute: the category of a builtin is one of a small enumerated set of concepts, the same pattern as a SKOS picklist restricting a field."@en .

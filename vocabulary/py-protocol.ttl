@@ -1,0 +1,30 @@
+@prefix py:      <https://colibri.example/ns/py#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+<https://colibri.example/ns/py/protocol> a owl:Ontology ;
+  dcterms:title "py-protocol: structural typing"@en ;
+  owl:imports <https://colibri.example/ns/py/core> ;
+  rdfs:comment """Protocols are structural, not intentional: a protocol is a requirement
+set of dunder methods, not a class. py:Sized requires __len__, py:Iterable
+requires __iter__. Membership is derived from structure and materialized
+offline - implementsProtocol(X, P) holds exactly when X has every method P
+requires - which is how Python itself recognizes duck types at call time."""@en .
+
+py:Protocol a rdfs:Class ;
+  rdfs:label "protocol"@en ;
+  rdfs:comment "A structural requirement set, not a class: e.g. the Sized protocol is 'has a __len__ method'. Membership is derived from structure (which methods an object has), never asserted."@en .
+
+py:requiresMethod a rdf:Property ;
+  rdfs:label "requires method"@en ;
+  rdfs:comment "Relates a protocol to a method name it requires (Sized requires __len__)."@en .
+
+py:implementsProtocol a rdf:Property ;
+  rdfs:label "implements protocol"@en ;
+  rdfs:comment "Materialized, never asserted directly: X implements P exactly when X structurally satisfies every method requirement of P. Computed offline by introspection (dir())."@en .
+
+py:hasMethod a rdf:Property ;
+  rdfs:label "has method"@en ;
+  rdfs:comment "An object exposes this method name (the structural fact protocol membership is derived from)."@en .
