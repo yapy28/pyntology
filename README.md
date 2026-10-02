@@ -1,4 +1,10 @@
-# Colibri
+# Pyntology — Python as an ontology system
+
+*Forked from Colibri (the vanilla ontology viewer). This is where the Python
+exploration lives: the tower, the A-box file extraction, conditions,
+protocols, SHACL validation events.*
+
+# Colibri (original README below)
 
 ![Colibri](assets/colibri.png)
 
