@@ -22,6 +22,7 @@ Usage: .venv/bin/python src/extract_python_file.py <file.py> [...]
 
 import ast
 import builtins
+import json
 import sys
 import types as types_mod
 from pathlib import Path
@@ -78,7 +79,10 @@ def ensure(g: Graph, obj) -> str | None:
         g.add((URIRef(iri), RDFS.label, Literal(f"{name} (typing alias)")))
         g.add((URIRef(iri), RDFS.comment,
                Literal(f"typing alias for {TYPING_ALIASES[name]} - "
-                       "annotation-only, no runtime class")))
+                       "annotation-only, no runtime class. The invariant "
+                       "that flags this node is deliberate: it catches "
+                       "the convenience fiction that typing aliases are "
+                       "real classes.")))
         return iri
     if isinstance(obj, type) or callable(obj):
         kind = pyx.node_type(obj)
@@ -154,6 +158,8 @@ def extract_file(path: Path, g: Graph):
     value_types = {}   # name -> type object, for operator-chain propagation
     modules = {}       # alias -> module object
     calls = set()      # (caller_iri, callee_iri)
+    func_defs = {}     # fname -> ast.FunctionDef, for the flow layer
+    func_iris = {}     # fname -> iri, for the flow layer
 
     def resolve_call(func) -> str | None:
         if isinstance(func, ast.Name):
@@ -281,6 +287,8 @@ def extract_file(path: Path, g: Graph):
             if ftype:
                 g.add((s, PY.instanceOf, URIRef(ftype)))
             bindings[fname] = iri
+            func_defs[fname] = stmt
+            func_iris[fname] = iri
             collect_calls(iri, stmt)
             continue
 
@@ -306,7 +314,286 @@ def extract_file(path: Path, g: Graph):
     for caller, callee in sorted(calls):
         g.add((URIRef(caller), PY.calls, URIRef(callee)))
 
-    return module_iri
+    flow = extract_flow(tree, module_iri, stem, bindings, modules,
+                       func_defs, func_iris)
+    return module_iri, flow
+
+
+def extract_flow(tree, module_iri, stem, bindings, modules,
+                 func_defs, func_iris):
+    """The data-flow layer: main()'s value chain, static, graph-native.
+
+    Emits a plain JSON fragment (no RDF): local variables of main() as
+    Variable nodes, flowIn/flowOut/binds links between values, variables
+    and callables, and an ordered stage list (the execution replay) that
+    the renderer plays with the Run button. The file is never executed;
+    everything here is read off the AST.
+    """
+    # every IRI this file's extraction can legitimately reference
+    known = (set(IRI_MAP.values()) | set(bindings.values())
+             | set(func_iris.values()) | {module_iri})
+
+    def known_iri(iri):
+        return iri is not None and (iri in known or iri in var_nodes)
+
+    def resolve_name(name, var_iris):
+        if name in var_iris:
+            return var_iris[name]
+        if name in bindings:
+            return bindings[name]
+        obj = getattr(builtins, name, None)
+        if obj is not None and obj in IRI_MAP:
+            return IRI_MAP[obj]
+        return None
+
+    # output channels: which function parameters get written to
+    # (write_csv opens its `path` parameter for writing)
+    write_channels = {}
+    for fname, fdef in func_defs.items():
+        params = [a.arg for a in fdef.args.args]
+        chans = set()
+        for node in ast.walk(fdef):
+            if not isinstance(node, ast.Call):
+                continue
+            target = mode = None
+            if (isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "open"
+                    and isinstance(node.func.value, ast.Name)):
+                target = node.func.value.id
+                for a in node.args:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                        mode = a.value
+                        break
+            elif (isinstance(node.func, ast.Name) and node.func.id == "open"
+                    and node.args and isinstance(node.args[0], ast.Name)):
+                target = node.args[0].id
+                for a in node.args[1:]:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                        mode = a.value
+                        break
+            if target in params and mode and any(m in mode for m in "wax+"):
+                chans.add(target)
+        if chans:
+            write_channels[fname] = chans
+
+    var_nodes = {}   # iri -> node dict
+    var_iris = {}    # name -> iri
+    flow_links = []
+    seen_links = set()
+
+    def add_link(s, t, ty):
+        if not s or not t or s == t or (s, t, ty) in seen_links:
+            return
+        seen_links.add((s, t, ty))
+        flow_links.append({"source": s, "target": t, "type": ty})
+
+    def new_var(name):
+        if name in var_iris:
+            return var_iris[name]
+        iri = FILE_NS + pyx.slug(stem) + "/variable/" + pyx.slug(name)
+        var_iris[name] = iri
+        var_nodes[iri] = {
+            "id": iri, "kind": "Variable", "name": name,
+            "provenance": pyx.slug(stem),
+            "description": f"local variable of main() in {stem}.py",
+            "val": 1,
+        }
+        add_link(iri, module_iri, "definedIn")
+        return iri
+
+    stages = []
+
+    def stage(id_, label, dur=1.4):
+        st = {"id": id_, "label": label, "dur": dur, "pulse": False,
+              "pulseNode": None, "edges": [], "glow": []}
+        stages.append(st)
+        return st
+
+    def st_edge(st, s, t, ty):
+        add_link(s, t, ty)
+        if s and t:
+            st["edges"].append([s, t])
+
+    def st_glow(st, iris):
+        for i in iris:
+            if i and i not in st["glow"]:
+                st["glow"].append(i)
+
+    def label_of(node):
+        try:
+            return ast.unparse(node)[:70]
+        except Exception:
+            return ""
+
+    def outer_call(node):
+        if isinstance(node, ast.Call):
+            return node
+        for child in ast.iter_child_nodes(node):
+            r = outer_call(child)
+            if r is not None:
+                return r
+        return None
+
+    def flowin_names(st, callee, expr):
+        """flowIn edges from every resolvable Name in expr to callee."""
+        for sub in ast.walk(expr):
+            if isinstance(sub, ast.Name):
+                iri = resolve_name(sub.id, var_iris)
+                if iri and known_iri(iri) and iri != callee:
+                    st_edge(st, iri, callee, "flowIn")
+
+    fname_by_iri = {iri: f for f, iri in func_iris.items()}
+
+    def walk_body(stmts):
+        for stmt in stmts:
+            if isinstance(stmt, ast.With):
+                for item in stmt.items:
+                    call = item.context_expr
+                    if not isinstance(call, ast.Call):
+                        continue
+                    callee = resolve_call_flow(call.func)
+                    if not callee or not known_iri(callee):
+                        continue
+                    st = stage(callee, label_of(call), 1.5)
+                    flowin_names(st, callee, call)
+                    if isinstance(item.optional_vars, ast.Name):
+                        v = new_var(item.optional_vars.id)
+                        st_edge(st, callee, v, "flowOut")
+                        st_glow(st, [callee, v])
+                walk_body(stmt.body)
+
+            elif isinstance(stmt, ast.Assign):
+                walk_assign(stmt)
+
+            elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                walk_call_stmt(stmt.value)
+
+            elif isinstance(stmt, ast.For):
+                walk_for(stmt)
+
+            elif isinstance(stmt, ast.If):
+                walk_body(stmt.body)
+                walk_body(stmt.orelse)
+
+            # AugAssign, Return, Pass: no value flowing worth a stage
+
+    def target_names(targets):
+        names = []
+        for t in targets:
+            for sub in ast.walk(t):
+                if isinstance(sub, ast.Name):
+                    names.append(sub.id)
+        return names
+
+    def walk_assign(stmt):
+        tnames = target_names(stmt.targets)
+        call = outer_call(stmt.value)
+        callee = resolve_call_flow(call.func) if call is not None else None
+        if callee and known_iri(callee):
+            st = stage(callee, label_of(stmt), 1.5)
+            for a in call.args:
+                if isinstance(a, ast.Name):
+                    iri = resolve_name(a.id, var_iris)
+                    if iri and known_iri(iri) and iri != callee:
+                        st_edge(st, iri, callee, "flowIn")
+            outs = []
+            for t in tnames:
+                v = new_var(t)
+                st_edge(st, callee, v, "flowOut")
+                outs.append(v)
+            st_glow(st, [callee] + outs)
+            return
+        # unresolved producer (row.get, item access): bind from what it reads
+        reads = []
+        for sub in ast.walk(stmt.value):
+            if isinstance(sub, ast.Name):
+                iri = resolve_name(sub.id, var_iris)
+                if iri and known_iri(iri) and iri not in reads:
+                    reads.append(iri)
+        if reads:
+            st = stage(reads[0], label_of(stmt), 1.2)
+            for t in tnames:
+                v = new_var(t)
+                st_edge(st, reads[0], v, "binds")
+                st_glow(st, [reads[0], v])
+
+    def walk_call_stmt(call):
+        callee = resolve_call_flow(call.func)
+        if not callee or not known_iri(callee):
+            return
+        st = stage(callee, label_of(call), 1.1)
+        flowin_names(st, callee, call)
+        # a file function writing to one of its parameters produces output
+        fname = fname_by_iri.get(callee)
+        if fname and fname in write_channels:
+            params = [a.arg for a in func_defs[fname].args.args]
+            for i, a in enumerate(call.args):
+                if i >= len(params) or params[i] not in write_channels[fname]:
+                    continue
+                if isinstance(a, ast.Name):
+                    out_iri = resolve_name(a.id, var_iris)
+                    if out_iri and known_iri(out_iri):
+                        st_edge(st, callee, out_iri, "flowOut")
+                        st["pulse"] = True
+                        st["pulseNode"] = out_iri
+                        st_glow(st, [out_iri])
+
+    def walk_for(stmt):
+        tnames = [sub.id for sub in ast.walk(stmt.target)
+                  if isinstance(sub, ast.Name)]
+        iter_ = stmt.iter
+        if isinstance(iter_, ast.Call):
+            callee = resolve_call_flow(iter_.func)
+            if callee and known_iri(callee):
+                st = stage(callee, label_of(stmt), 1.3)
+                flowin_names(st, callee, iter_)
+                for t in tnames:
+                    v = new_var(t)
+                    st_edge(st, callee, v, "binds")
+                st_glow(st, [callee])
+        elif isinstance(iter_, ast.Name):
+            iri = resolve_name(iter_.id, var_iris)
+            if iri and known_iri(iri):
+                st = stage(iri, label_of(stmt), 1.2)
+                for t in tnames:
+                    v = new_var(t)
+                    st_edge(st, iri, v, "binds")
+                    st_glow(st, [iri, v])
+        walk_body(stmt.body)
+
+    def resolve_call_flow(func):
+        if isinstance(func, ast.Name):
+            if func.id in bindings:
+                return bindings[func.id]
+            obj = getattr(builtins, func.id, None)
+            if obj is not None and obj in IRI_MAP:
+                return IRI_MAP[obj]
+            return None
+        if (isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id in modules):
+            mod = modules[func.value.id]
+            obj = getattr(mod, func.attr, None)
+            if obj is None:
+                return None
+            return IRI_MAP.get(obj)
+        return None
+
+    program = None
+    if "main" in func_defs and "main" in func_iris:
+        entry = func_iris["main"]
+        stage(module_iri, f"{stem} loads", 1.2)
+        stage(entry, "main() starts", 1.0)
+        walk_body(func_defs["main"].body)
+        if stages:
+            program = {"entry": entry, "stages": stages}
+
+    return {
+        "provenance": pyx.slug(stem),
+        "nodes": list(var_nodes.values()),
+        "links": flow_links,
+        "program": program,
+    }
 
 
 def _function_type_iri(g: Graph):
@@ -321,10 +608,11 @@ def main():
     g = Graph()
     g.bind("py", PY)
     g.bind("rdfs", RDFS)
+    flows = []
     for path_str in sys.argv[1:]:
         path = Path(path_str)
-        extract_file(path, g)
-        out = OUT_DIR / (pyx.slug(path.stem) + ".ttl")
+        _, flow = extract_file(path, g)
+        flows.append((path, flow))
     if len(sys.argv) == 2:
         out = OUT_DIR / (pyx.slug(Path(sys.argv[1]).stem) + ".ttl")
     else:
@@ -333,6 +621,17 @@ def main():
     g.serialize(destination=str(out), format="turtle")
     print(f"file instances written -> {out.relative_to(ROOT)}")
     print(f"  triples: {len(g)}")
+
+    flow_dir = ROOT / "data" / "flow"
+    flow_dir.mkdir(parents=True, exist_ok=True)
+    for path, flow in flows:
+        fout = flow_dir / (pyx.slug(path.stem) + ".json")
+        fout.write_text(json.dumps(flow, indent=1, ensure_ascii=False),
+                        encoding="utf-8")
+        n_stages = len(flow["program"]["stages"]) if flow["program"] else 0
+        print(f"flow fragment -> {fout.relative_to(ROOT)} "
+              f"({len(flow['nodes'])} variables, {len(flow['links'])} links, "
+              f"{n_stages} stages)")
 
 
 if __name__ == "__main__":

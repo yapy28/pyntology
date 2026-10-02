@@ -15,6 +15,7 @@ data/onto2/
 sources/raw/
 
 # generated artifacts
+data/flow/
 web/graph.json
 web/file-graph.json
 reports/

@@ -96,9 +96,28 @@ def main():
     out_links = [l for l in links
                  if l["source"] in include and l["target"] in include]
 
+    payload = {"nodes": out_nodes, "links": out_links}
+
+    # the flow program rides along, clipped to the scoped view: stages
+    # whose node is outside the view and edges that cross the boundary
+    # are dropped so the Run button only ever references visible nodes
+    program = data.get("program")
+    if program:
+        stages = []
+        for st in program.get("stages", []):
+            if st.get("id") not in include:
+                continue
+            st = dict(st)
+            st["edges"] = [[a, b] for a, b in st.get("edges", [])
+                           if a in include and b in include]
+            st["glow"] = [g for g in st.get("glow", []) if g in include]
+            stages.append(st)
+        if stages:
+            payload["program"] = {**program, "stages": stages}
+
     graph_out = Path(args.graph_out)
-    graph_out.write_text(json.dumps({"nodes": out_nodes, "links": out_links},
-                                    ensure_ascii=False), encoding="utf-8")
+    graph_out.write_text(json.dumps(payload, ensure_ascii=False),
+                         encoding="utf-8")
 
     by_kind, by_prov, by_type = {}, {}, {}
     for n in out_nodes:

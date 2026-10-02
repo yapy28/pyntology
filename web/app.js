@@ -23,6 +23,7 @@ const COLORS = {
   Violation: '#ff006e',
   Store: '#3a0ca3',
   Graph: '#f6bd60',
+  Variable: '#ffd166',
   root: '#ff5d8f',
   dim: '#1c2b33',
   selected: '#ffffff',
@@ -35,7 +36,7 @@ const KIND_LABELS = {
   Metatype: 'metatype', Exception: 'exception', Value: 'value',
   Callable: 'callable', Module: 'module', Protocol: 'protocol',
   Shape: 'SHACL shape', Violation: 'violation',
-  Store: 'store', Graph: 'named graph',
+  Store: 'store', Graph: 'named graph', Variable: 'variable',
 };
 const HIER_LINKS = ['subclass', 'subProperty', 'broader', 'imports',
                     'storedIn', 'hostedIn',
@@ -72,6 +73,9 @@ const LINK_COLOR = {
   range: 'rgba(224, 122, 95, 0.5)',
   inverseOf: 'rgba(255, 255, 255, 0.3)',
   definedBy: 'rgba(67, 97, 238, 0.28)',
+  flowIn: 'rgba(61, 220, 151, 0.6)',
+  flowOut: 'rgba(61, 220, 151, 0.6)',
+  binds: 'rgba(255, 209, 102, 0.5)',
 };
 const DIM_LINK = 'rgba(255, 255, 255, 0.03)';
 
@@ -89,6 +93,7 @@ const REL_LABELS = {
   hasValue: 'must include', classConstraint: 'must be a',
   violationOf: 'checked by', violationAt: 'violated at',
   storedIn: 'stored in', hostedIn: 'hosted in',
+  flowIn: 'flows in', flowOut: 'flows out', binds: 'binds',
 };
 
 function kindLabel(node) {

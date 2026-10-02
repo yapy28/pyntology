@@ -35,6 +35,30 @@ node scripts/verify_web.mjs                # serves web/ and checks everything
 python3 -m http.server -d web               # then open http://localhost:8000
 ```
 
+## Replay a Python file's flow (the Run button)
+
+`src/extract_python_file.py` instantiates the ontology with a Python file
+(static AST analysis, the file is never executed). It emits the A-box TTL
+into `data/ontologies/` and, when the file has a `main()`, a graph-native
+flow fragment into `data/flow/`: the local variables of `main()`, the
+`flowIn` / `flowOut` / `binds` value chain, and an ordered stage list —
+the execution replay. `build.py` merges every fragment into `graph.json`,
+and the onion renderer plays it with the **Run** button: the camera glides
+stage by stage, values travel as dots along the flow edges, and every
+produced output file pulses green (stays marked until Esc).
+
+```bash
+.venv/bin/python src/extract_python_file.py my_file.py    # -> TTL + data/flow/*.json
+.venv/bin/python build/build.py                           # merge the flow layer in
+.venv/bin/python build/build_file_view.py my-file         # scoped view of just that file
+python3 build/export_html.py --page web/onion.html \
+    --graph web/file-graph.json --out dist/my-file.html   # standalone, Run included
+```
+
+Navigation in the onion: drag orbits, right-drag or shift-drag pans along
+the camera's screen axes, scroll (or +/-) zooms, arrows nudge, R resets the
+camera, Esc stops a run and clears the output marks.
+
 **Bring your own ontologies**: drop `.ttl` / `.owl` / `.rdf` / `.nt` / `.jsonld` files into `data/ontologies/` and rebuild — classes, properties, SKOS vocabularies and `owl:imports` structure render alongside the operating model. See `data/ontologies/README.md` for the mapping rules.
 
 ## Export a standalone HTML

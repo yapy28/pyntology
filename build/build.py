@@ -56,7 +56,7 @@ KIND_ALIAS = {
 KIND_RANK = {
     "AssetType": 0, "AttributeType": 0, "RelationType": 0,
     "Exception": 0, "Value": 0, "Callable": 0, "Shape": 0,
-    "Violation": 0,
+    "Violation": 0, "Variable": 0,
     "Ontology": 1, "Metatype": 2, "Vocabulary": 2,
     "Class": 3, "Property": 4, "Concept": 5,
 }
@@ -530,6 +530,44 @@ def main():
             links.append({"source": iri, "target": focus,
                           "type": "violationAt"})
 
+    # ---- the flow layer: static data-flow fragments from extracted files ----
+    # Graph-native JSON (no RDF): main()'s local variables, the flowIn /
+    # flowOut / binds links between values, variables and callables, and
+    # the ordered stage list the renderer plays with the Run button.
+    flow_dir = ROOT / "data" / "flow"
+    programs = []
+    if flow_dir.exists():
+        for f in sorted(flow_dir.glob("*.json")):
+            try:
+                frag = json.loads(f.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as err:
+                print(f"  skipping flow fragment {f.name}: {err}")
+                continue
+            for n in frag.get("nodes", []):
+                if n.get("id") in node_by_id:
+                    continue
+                node_by_id[n["id"]] = {
+                    "id": n["id"], "kind": n.get("kind", "Variable"),
+                    "name": n.get("name", iri_tail(n["id"])),
+                    "labels": n.get("labels", {}),
+                    "provenance": n.get("provenance", f.stem),
+                    "description": n.get("description", ""),
+                    "product": "", "attrKind": "", "coRole": "",
+                    "possibleValues": [], "unrestricted": False,
+                    "unassigned": False, "towerLevel": None,
+                    "val": n.get("val", 1),
+                }
+            added = 0
+            for l in frag.get("links", []):
+                if (l["source"] in node_by_id and l["target"] in node_by_id
+                        and l not in links):
+                    links.append(l)
+                    added += 1
+            if frag.get("program"):
+                programs.append(frag["program"])
+            print(f"  flow fragment: {f.name} "
+                  f"({len(frag.get('nodes', []))} nodes, {added} links)")
+
     # node size = weighted structural degree
     children, attrs_in, rels_in, out_refs = {}, {}, {}, {}
     for l in links:
@@ -553,8 +591,11 @@ def main():
 
     nodes = list(node_by_id.values())
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({"nodes": nodes, "links": links}, ensure_ascii=False),
-                   encoding="utf-8")
+    payload = {"nodes": nodes, "links": links}
+    if programs:
+        payload["program"] = programs[0]
+        payload["programs"] = programs
+    OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
     # ---- missing entities report: what to hunt for in the system ----
     report = []

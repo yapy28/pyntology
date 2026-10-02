@@ -12,6 +12,7 @@ const NODE_COLORS = {
   Exception: '#f94144', Value: '#a9d6ff', Callable: '#bc6c25',
   Module: '#606c38', Protocol: '#7cb518', Shape: '#ff7b00',
   Violation: '#ff006e', Store: '#3a0ca3', Graph: '#f6bd60',
+  Variable: '#ffd166',
 };
 const SHELL_COLORS = { Store: '#8b7bff', Graph: '#f6bd60', Ontology: '#4361ee', Module: '#90be6d' };
 const EDGE_COLORS = {
@@ -27,6 +28,7 @@ const EDGE_COLORS = {
   storedIn: '#8b7bff', hostedIn: '#f6bd60',
   assignedTo: '#ffbf69', head: '#c77dff', tail: '#c77dff',
   domain: '#e07a5f', range: '#e07a5f', inverseOf: '#7c8f99',
+  flowIn: '#3ddc97', flowOut: '#3ddc97', binds: '#ffd166',
 };
 const CONT_LINKS = ['definedBy', 'definedIn', 'hostedIn', 'storedIn'];
 // the Python dialect: kinds display in Python's own words, not RDF's
@@ -36,6 +38,7 @@ const KIND_LABELS = {
   Value: 'value', Callable: 'callable', Class: 'class', Type: 'class',
   Metatype: 'metatype', Exception: 'exception', Protocol: 'protocol',
   Concept: 'concept', Property: 'property', Violation: 'violation',
+  Variable: 'variable',
 };
 const kindLabel = (n) => KIND_LABELS[n.kind] || n.kind.toLowerCase();
 const fromLabel = (p) => {
@@ -57,6 +60,7 @@ const REL_LABELS = {
   hasValue: 'must include', classConstraint: 'must be a',
   violationOf: 'checked by', violationAt: 'violated at',
   storedIn: 'loaded into', hostedIn: 'declared in',
+  flowIn: 'flows in', flowOut: 'flows out', binds: 'binds',
 };
 
 const FRESNEL_VERT = `
@@ -83,6 +87,9 @@ const state = {
   selEdges: null,             // highlight LineSegments
   camera: null, target: null,
   dist: 1000, theta: 0.7, phi: 1.15, maxShell: 600,
+  flyTo: null,                // {x, y, z, dist} eased camera goal
+  running: false, runCancel: false, runMarked: [],
+  dots: [],                  // traveling flow dots: {mesh, from, to, t0, dur}
 };
 
 function makeTextSprite(text, color) {
@@ -232,27 +239,72 @@ async function main() {
     }
   });
 
-  // orbit controls
+  // navigation: orbit + pan + zoom, all axes, no dead ends
   const target = new THREE.Vector3(0, 0, 0);
   state.target = target;
   let drag = null;
   const dom = renderer.domElement;
-  dom.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, moved: 0 }; });
+  dom.addEventListener('contextmenu', (e) => e.preventDefault());
+  dom.addEventListener('pointerdown', (e) => {
+    drag = { x: e.clientX, y: e.clientY, moved: 0,
+             pan: e.button === 2 || e.shiftKey };
+    state.flyTo = null;
+  });
   window.addEventListener('pointerup', () => { drag = null; });
   window.addEventListener('pointermove', (e) => {
-    if (drag) {
-      state.theta -= (e.clientX - drag.x) * 0.005;
-      state.phi = Math.min(Math.PI - 0.05, Math.max(0.05, state.phi - (e.clientY - drag.y) * 0.005));
-      drag.moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
-      drag.x = e.clientX; drag.y = e.clientY;
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    drag.moved += Math.abs(dx) + Math.abs(dy);
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.pan) {
+      // pan the focus point along the camera's own screen axes, scaled by
+      // distance so the feel is the same at every zoom level; content
+      // follows the cursor
+      const k = state.dist * 0.0016;
+      const view = new THREE.Vector3().subVectors(target, camera.position)
+        .normalize();
+      const rightAxis = new THREE.Vector3()
+        .crossVectors(view, camera.up).normalize();
+      const upAxis = new THREE.Vector3()
+        .crossVectors(rightAxis, view).normalize();
+      target.addScaledVector(rightAxis, -dx * k)
+        .addScaledVector(upAxis, dy * k);
+    } else {
+      state.theta -= dx * 0.005;
+      state.phi = Math.min(Math.PI - 0.05,
+        Math.max(0.05, state.phi - dy * 0.005));
     }
   });
   dom.addEventListener('wheel', (e) => {
-    state.dist = Math.min(state.maxShell * 8, Math.max(60, state.dist * (1 + e.deltaY * 0.001)));
+    state.flyTo = null;
+    state.dist = Math.min(state.maxShell * 8,
+      Math.max(25, state.dist * (1 + e.deltaY * 0.001)));
     e.preventDefault();
   }, { passive: false });
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') clearSelection();
+    if (e.key === 'Escape') {
+      if (state.running) cancelRun();
+      else { clearRunMarks(); clearSelection(); }
+      return;
+    }
+    // keyboard nudges: full 3D without ever getting stuck
+    const step = e.shiftKey ? 0.02 : 0.07;
+    if (e.key === 'ArrowLeft') state.theta -= step;
+    else if (e.key === 'ArrowRight') state.theta += step;
+    else if (e.key === 'ArrowUp')
+      state.phi = Math.max(0.05, state.phi - step);
+    else if (e.key === 'ArrowDown')
+      state.phi = Math.min(Math.PI - 0.05, state.phi + step);
+    else if (e.key === '+' || e.key === '=')
+      state.dist = Math.max(25, state.dist * 0.9);
+    else if (e.key === '-' || e.key === '_')
+      state.dist = Math.min(state.maxShell * 8, state.dist * 1.1);
+    else if (e.key === 'r' || e.key === 'R')
+      flyTo({ x: 0, y: 0, z: 0, dist: state.maxShell * 3.0 });
+    else return;
+    if (e.key.startsWith('Arrow') || e.key === '+' || e.key === '-'
+        || e.key === '=' || e.key === '_') e.preventDefault();
   });
 
   // picking: nodes first (bubbles never steal node clicks), then bubbles
@@ -294,6 +346,7 @@ async function main() {
   let lastClickId = null;
   dom.addEventListener('click', (e) => {
     if (drag && drag.moved > 6) return;
+    if (state.running) return;
     const hit = pickAt(e);
     const now = performance.now();
     if (hit && hit.node) {
@@ -319,6 +372,32 @@ async function main() {
   });
 
   const frame = () => {
+    // eased camera flight: approach the goal, never teleport
+    if (state.flyTo) {
+      const goal = state.flyTo;
+      target.lerp(goal, 0.08);
+      state.dist += (goal.dist - state.dist) * 0.08;
+      if (target.distanceTo(goal) < 0.5
+          && Math.abs(goal.dist - state.dist) < 1) {
+        target.copy(goal);
+        state.flyTo = null;
+      }
+    }
+    // traveling flow dots, born and dying with their stage
+    const now = performance.now();
+    for (let i = state.dots.length - 1; i >= 0; i--) {
+      const d = state.dots[i];
+      const p = Math.min(1, (now - d.t0) / d.dur);
+      const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      d.mesh.position.lerpVectors(d.from, d.to, ease);
+      d.mesh.position.y += Math.sin(ease * Math.PI) * d.arc;
+      if (p >= 1) {
+        scene.remove(d.mesh);
+        d.mesh.geometry.dispose();
+        d.mesh.material.dispose();
+        state.dots.splice(i, 1);
+      }
+    }
     camera.position.set(
       target.x + state.dist * Math.sin(state.phi) * Math.cos(state.theta),
       target.y + state.dist * Math.cos(state.phi),
@@ -385,11 +464,12 @@ async function main() {
     // flight
     const p = pos.get(id);
     if (fly && p) {
-      target.set(p.x, p.y, p.z);
       const mesh = state.nodeMeshes.get(id);
       const scale = mesh ? mesh.scale.x : 8;
-      if (shell) state.dist = Math.max(120, shell.userData.radius * 2.4);
-      else state.dist = Math.min(state.dist, 150 + 30 * scale);
+      const dist = shell
+        ? Math.max(120, shell.userData.radius * 2.4)
+        : Math.min(state.dist, 150 + 30 * scale);
+      flyTo({ x: p.x, y: p.y, z: p.z, dist });
     }
   }
 
@@ -409,6 +489,116 @@ async function main() {
       rim.material.uniforms.uBoost.value = 1.0;
     }
     panel.classList.remove('visible');
+  }
+
+  // ---- the run button: replay the program's execution order -----------
+  // A static reading of main(): the camera glides stage by stage, the
+  // values travel as dots along the flow edges, and every produced
+  // output pulses green and stays marked until Esc.
+  const program = data.program || (data.programs && data.programs[0]);
+  const runBtn = document.getElementById('run');
+  const stageEl = document.getElementById('stage');
+  if (!program || !program.stages || !program.stages.length) {
+    runBtn.style.display = 'none';
+  } else {
+    runBtn.addEventListener('click', () => {
+      if (state.running) cancelRun();
+      else runProgram();
+    });
+  }
+
+  const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
+
+  function flyTo({ x, y, z, dist }) {
+    const goal = new THREE.Vector3(x, y, z);
+    goal.dist = dist;
+    state.flyTo = goal;
+  }
+
+  async function runProgram() {
+    state.running = true;
+    state.runCancel = false;
+    runBtn.textContent = 'Stop';
+    runBtn.classList.add('running');
+    clearSelection();
+    clearRunMarks();
+    for (let i = 0; i < program.stages.length; i++) {
+      if (state.runCancel) break;
+      const st = program.stages[i];
+      const name = state.byId.get(st.id)?.name || st.id.split('/').pop();
+      stageEl.textContent = `${i + 1}/${program.stages.length} \u2014 ${st.label || name}`;
+      stageEl.classList.add('visible');
+      playStage(st);
+      await sleep(st.dur || 1.4);
+    }
+    // restore normal colors; the green output marks stay until Esc
+    stageEl.classList.remove('visible');
+    for (const [nid, mesh] of state.nodeMeshes) {
+      if (!state.runMarked.includes(nid)) {
+        mesh.material.color.copy(mesh.userData.baseColor);
+      }
+    }
+    state.running = false;
+    runBtn.textContent = 'Run';
+    runBtn.classList.remove('running');
+  }
+
+  function playStage(st) {
+    // camera glides to this stage's node
+    const p = pos.get(st.id);
+    if (p) flyTo({ x: p.x, y: p.y, z: p.z, dist: Math.min(state.dist, 320) });
+    // light the stage's cast, dim the rest of the world
+    const cast = new Set([st.id, ...(st.glow || [])]);
+    for (const [nid, mesh] of state.nodeMeshes) {
+      if (nid === st.id) mesh.material.color.set('#ffffff');
+      else if (cast.has(nid) && !state.runMarked.includes(nid)) {
+        mesh.material.color.copy(mesh.userData.baseColor);
+      } else {
+        mesh.material.color.set('#1c2b33');
+      }
+    }
+    // a traveling dot per flow edge, arcing through the bubble
+    const now = performance.now();
+    for (const [s, t] of st.edges || []) {
+      const a = pos.get(s);
+      const b = pos.get(t);
+      if (!a || !b) continue;
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(2.6, 10, 8),
+        new THREE.MeshBasicMaterial({ color: '#3ddc97' }));
+      mesh.raycast = () => {};
+      scene.add(mesh);
+      const from = new THREE.Vector3(a.x, a.y, a.z);
+      const to = new THREE.Vector3(b.x, b.y, b.z);
+      state.dots.push({
+        mesh, t0: now, dur: (st.dur || 1.4) * 1000, from, to,
+        arc: 0.1 * from.distanceTo(to),
+      });
+    }
+    // output produced: pulse it green, keep it marked until Esc
+    if (st.pulse && st.pulseNode && state.nodeMeshes.has(st.pulseNode)) {
+      const mesh = state.nodeMeshes.get(st.pulseNode);
+      mesh.material.color.set('#3ddc97');
+      mesh.material.emissive.setHex(0x1f8f4a);
+      if (!state.runMarked.includes(st.pulseNode)) {
+        state.runMarked.push(st.pulseNode);
+      }
+    }
+  }
+
+  function cancelRun() {
+    state.runCancel = true;  // the loop exits after the current stage
+  }
+
+  function clearRunMarks() {
+    for (const nid of state.runMarked) {
+      const mesh = state.nodeMeshes.get(nid);
+      if (mesh) {
+        mesh.material.color.copy(mesh.userData.baseColor);
+        mesh.material.emissive.setHex(0x11181c);
+      }
+    }
+    state.runMarked = [];
   }
 
   function renderPanel(n) {
