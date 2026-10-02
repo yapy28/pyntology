@@ -145,12 +145,16 @@ async function main() {
   // containment shells: fresnel glass + faint fill + label
   for (const s of shells) {
     const color = SHELL_COLORS[s.kind] || '#7c8f99';
+    // big containers recede: rim and fill fade with radius so the
+    // content outshines the bubbles wrapping it
+    const presence = Math.min(1, 16 / s.radius);
+    const baseBoost = 0.35 + 0.65 * presence;
     const rim = new THREE.Mesh(
       new THREE.SphereGeometry(s.radius, 48, 32),
       new THREE.ShaderMaterial({
         uniforms: {
           uColor: { value: new THREE.Color(color) },
-          uBoost: { value: 1.0 },
+          uBoost: { value: baseBoost },
         },
         vertexShader: FRESNEL_VERT, fragmentShader: FRESNEL_FRAG,
         transparent: true, blending: THREE.AdditiveBlending,
@@ -160,12 +164,14 @@ async function main() {
     rim.renderOrder = -1;
     rim.userData.containerId = s.id;   // clickable bubble
     rim.userData.radius = s.radius;
+    rim.userData.baseBoost = baseBoost;
     scene.add(rim);
     state.shellRims.set(s.id, rim);
     const fill = new THREE.Mesh(
       new THREE.SphereGeometry(s.radius, 24, 16),
       new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.028,
+        color, transparent: true,
+        opacity: 0.028 * (0.3 + 0.7 * presence),
         side: THREE.DoubleSide, depthWrite: false,
       }));
     fill.position.copy(rim.position);
@@ -473,7 +479,8 @@ async function main() {
     }
     // boost the containing bubble's rim
     for (const [cid, rim] of state.shellRims) {
-      rim.material.uniforms.uBoost.value = (cid === id) ? 2.2 : 1.0;
+      rim.material.uniforms.uBoost.value = (cid === id)
+        ? 2.2 : rim.userData.baseBoost;
     }
     const containerOf = new Map();
     for (const l of state.data.links) {
@@ -509,7 +516,7 @@ async function main() {
       state.selEdges = null;
     }
     for (const rim of state.shellRims.values()) {
-      rim.material.uniforms.uBoost.value = 1.0;
+      rim.material.uniforms.uBoost.value = rim.userData.baseBoost;
     }
     panel.classList.remove('visible');
   }
