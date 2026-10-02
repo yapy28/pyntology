@@ -23,6 +23,11 @@
   header .title { font-size: 16px; font-weight: 600; }
   header .title em { color: var(--accent); font-style: normal; }
   header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  header input {
+    background: #101c22; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 10px; width: 220px; outline: none; margin-left: 12px;
+  }
+  header input:focus { border-color: var(--accent); }
   #tooltip {
     position: fixed; z-index: 20; pointer-events: none; display: none;
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
@@ -57,11 +62,12 @@
 <header>
   <img src="assets/colibri-outline.png" alt="Pyntology">
   <div class="title">Pyntology <em>&mdash;</em> the onion</div>
-  <div class="sub">dedicated containment renderer &middot; store at the center, worlds within worlds</div>
+  <input id="search" type="text" placeholder="search a node... (Enter)" autocomplete="off">
+  <div class="sub">dedicated containment renderer &middot; bubbles clickable &middot; chips fly</div>
 </header>
 <div id="tooltip"></div>
 <div id="panel"></div>
-<div id="hint">drag: orbit &middot; scroll: zoom &middot; click a node: inspect &middot; double-click: fly into it</div>
+<div id="hint">drag: orbit &middot; scroll: zoom &middot; click: inspect node or bubble &middot; double-click: fly in &middot; Esc: clear</div>
 <div id="legend"></div>
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 <script src="onion-layout.js"></script>

@@ -1,7 +1,8 @@
 /* Pyntology onion: a dedicated three.js renderer for the containment graph.
  * Fresnel-shaded glass bubbles nested by the balloon-tree layout, nodes
- * glowing inside them, relation wires crossing the levels. No force
- * simulation - the layout is computed, the onion is drawn.
+ * glowing inside them, relation wires crossing the levels - with the full
+ * interaction model: clickable bubbles, selection highlight, 1-hop edges,
+ * search, and a relations panel where every chip flies you there.
  */
 
 const NODE_COLORS = {
@@ -28,6 +29,21 @@ const EDGE_COLORS = {
   domain: '#e07a5f', range: '#e07a5f', inverseOf: '#7c8f99',
 };
 const CONT_LINKS = ['definedBy', 'definedIn', 'hostedIn', 'storedIn'];
+const REL_LABELS = {
+  instanceOf: 'instance of', subclassOf: 'subclass of',
+  subProperty: 'subproperty of', mroNext: 'next in MRO',
+  metaclassOf: 'metaclass of', calls: 'calls', definedIn: 'defined in',
+  definedBy: 'defined by', broader: 'broader than', inScheme: 'in scheme',
+  imports: 'imports', domain: 'domain of', range: 'range of',
+  head: 'head of', tail: 'tail of', assignedTo: 'assigned to',
+  inverseOf: 'inverse of', raises: 'raises',
+  raisesWhen: 'raises when', precondition: 'requires',
+  implementsProtocol: 'implements', callCategory: 'category',
+  targets: 'targets', property: 'property', path: 'path',
+  hasValue: 'must include', classConstraint: 'must be a',
+  violationOf: 'checked by', violationAt: 'violated at',
+  storedIn: 'stored in', hostedIn: 'hosted in',
+};
 
 const FRESNEL_VERT = `
   varying vec3 vNormal; varying vec3 vView;
@@ -38,12 +54,22 @@ const FRESNEL_VERT = `
     gl_Position = projectionMatrix * mv;
   }`;
 const FRESNEL_FRAG = `
-  uniform vec3 uColor;
+  uniform vec3 uColor; uniform float uBoost;
   varying vec3 vNormal; varying vec3 vView;
   void main() {
     float f = pow(clamp(0.82 - dot(vNormal, vView), 0.0, 1.0), 2.2);
-    gl_FragColor = vec4(uColor, 1.0) * f * 1.6;
+    gl_FragColor = vec4(uColor, 1.0) * f * 1.6 * uBoost;
   }`;
+
+const state = {
+  data: null, byId: new Map(), pos: null,
+  nodeMeshes: new Map(),      // id -> mesh
+  shellRims: new Map(),       // container id -> rim mesh
+  selected: null, neighbors: new Set(),
+  selEdges: null,             // highlight LineSegments
+  camera: null, target: null,
+  dist: 1000, theta: 0.7, phi: 1.15, maxShell: 600,
+};
 
 function makeTextSprite(text, color) {
   const canvas = document.createElement('canvas');
@@ -59,6 +85,7 @@ function makeTextSprite(text, color) {
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.85, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
   sprite.scale.set(w * 0.55, 38, 1);
+  sprite.raycast = () => {};
   return sprite;
 }
 
@@ -71,9 +98,10 @@ async function main() {
       '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#7c8f99">missing three.js or onion-layout.js</div>');
     return;
   }
-
+  state.data = data;
+  state.byId = new Map(data.nodes.map((n) => [n.id, n]));
   const { pos, shells } = onionLayout(data.nodes, data.links);
-  const byId = new Map(data.nodes.map((n) => [n.id, n]));
+  state.pos = pos;
 
   // scene
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -83,27 +111,32 @@ async function main() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#0d1418');
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 400000);
+  state.camera = camera;
   scene.add(new THREE.AmbientLight(0xffffff, 0.9));
   const light = new THREE.DirectionalLight(0xffffff, 0.6);
   light.position.set(1, 1, 1);
   scene.add(light);
 
   // containment shells: fresnel glass + faint fill + label
-  const pickables = [];
   for (const s of shells) {
     const color = SHELL_COLORS[s.kind] || '#7c8f99';
     const rim = new THREE.Mesh(
       new THREE.SphereGeometry(s.radius, 48, 32),
       new THREE.ShaderMaterial({
-        uniforms: { uColor: { value: new THREE.Color(color) } },
+        uniforms: {
+          uColor: { value: new THREE.Color(color) },
+          uBoost: { value: 1.0 },
+        },
         vertexShader: FRESNEL_VERT, fragmentShader: FRESNEL_FRAG,
         transparent: true, blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide, depthWrite: false,
       }));
     rim.position.set(s.center.x, s.center.y, s.center.z);
     rim.renderOrder = -1;
-    rim.raycast = () => {};
+    rim.userData.containerId = s.id;   // clickable bubble
+    rim.userData.radius = s.radius;
     scene.add(rim);
+    state.shellRims.set(s.id, rim);
     const fill = new THREE.Mesh(
       new THREE.SphereGeometry(s.radius, 24, 16),
       new THREE.MeshBasicMaterial({
@@ -114,11 +147,12 @@ async function main() {
     fill.renderOrder = -1;
     fill.raycast = () => {};
     scene.add(fill);
-    const label = makeTextSprite(byId.get(s.id)?.name || s.id.split('/').pop(), color);
+    const label = makeTextSprite(state.byId.get(s.id)?.name || s.id.split('/').pop(), color);
     label.position.set(s.center.x, s.center.y + s.radius * 1.02, s.center.z);
-    label.raycast = () => {};
     scene.add(label);
   }
+  state.maxShell = shells.reduce((a, s) => Math.max(a, s.radius), 600);
+  state.dist = state.maxShell * 3.0;
 
   // nodes
   const nodeGeo = new THREE.SphereGeometry(1, 16, 12);
@@ -126,24 +160,25 @@ async function main() {
     const p = pos.get(n.id);
     if (!p) continue;
     const r = (n.val || 0) ? 6 + 5 * Math.cbrt((n.val || 0) + 1) : 7;
+    const base = new THREE.Color(NODE_COLORS[n.kind] || '#7c8f99');
     const mesh = new THREE.Mesh(nodeGeo, new THREE.MeshLambertMaterial({
-      color: NODE_COLORS[n.kind] || '#7c8f99', emissive: 0x11181c,
+      color: base.clone(), emissive: 0x11181c,
     }));
     mesh.scale.setScalar(Math.max(4, r));
     mesh.position.set(p.x, p.y, p.z);
     mesh.userData.node = n;
+    mesh.userData.baseColor = base;
     scene.add(mesh);
-    pickables.push(mesh);
+    state.nodeMeshes.set(n.id, mesh);
   }
 
   // edges, grouped by type so colors survive
-  const posById = pos;
   for (const [type, color] of Object.entries(EDGE_COLORS)) {
     const pts = [];
     for (const l of data.links) {
       if (l.type !== type) continue;
-      const a = posById.get(l.source);
-      const b = posById.get(l.target);
+      const a = pos.get(l.source);
+      const b = pos.get(l.target);
       if (!a || !b) continue;
       pts.push(a.x, a.y, a.z, b.x, b.y, b.z);
     }
@@ -155,107 +190,112 @@ async function main() {
     })));
   }
 
-  // legend (shells + node kinds present)
+  // legend
   const kinds = [...new Set(data.nodes.map((n) => n.kind))];
   document.getElementById('legend').innerHTML =
     Object.entries(SHELL_COLORS).map(([k, c]) =>
-      `<div><span class="dot" style="background:${c};opacity:.85"></span>${k.toLowerCase()} bubble</div>`).join('')
+      `<div><span class="dot" style="background:${c};opacity:.85"></span>${k.toLowerCase()} bubble (clickable)</div>`).join('')
     + kinds.map((k) =>
       `<div><span class="dot" style="background:${NODE_COLORS[k] || '#7c8f99'}"></span>${k.toLowerCase()}</div>`).join('');
 
-  // orbit controls (manual: drag rotates, wheel zooms, double-click flies)
-  const maxShell = shells.reduce((a, s) => Math.max(a, s.radius), 600);
-  let theta = 0.7, phi = 1.15, dist = maxShell * 3.0;
+  // search
+  const dl = document.createElement('datalist');
+  dl.id = 'node-names';
+  document.body.appendChild(dl);
+  dl.innerHTML = data.nodes.map((n) => `<option value="${n.name.replace(/&/g, '&amp;').replace(/</g, '&lt;')}">`).join('');
+  const search = document.getElementById('search');
+  search.setAttribute('list', 'node-names');
+  search.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const q = search.value.trim().toLowerCase();
+    if (!q) return;
+    const hit = data.nodes.find((n) => n.name.toLowerCase() === q)
+      || data.nodes.find((n) => n.name.toLowerCase().includes(q));
+    if (hit) {
+      selectNode(hit.id, { fly: true });
+    } else {
+      search.placeholder = `no match for "${q}"`;
+    }
+  });
+
+  // orbit controls
   const target = new THREE.Vector3(0, 0, 0);
+  state.target = target;
   let drag = null;
   const dom = renderer.domElement;
   dom.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, moved: 0 }; });
   window.addEventListener('pointerup', () => { drag = null; });
   window.addEventListener('pointermove', (e) => {
     if (drag) {
-      theta -= (e.clientX - drag.x) * 0.005;
-      phi = Math.min(Math.PI - 0.05, Math.max(0.05, phi - (e.clientY - drag.y) * 0.005));
+      state.theta -= (e.clientX - drag.x) * 0.005;
+      state.phi = Math.min(Math.PI - 0.05, Math.max(0.05, state.phi - (e.clientY - drag.y) * 0.005));
       drag.moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
       drag.x = e.clientX; drag.y = e.clientY;
     }
   });
   dom.addEventListener('wheel', (e) => {
-    dist = Math.min(maxShell * 8, Math.max(60, dist * (1 + e.deltaY * 0.001)));
+    state.dist = Math.min(state.maxShell * 8, Math.max(60, state.dist * (1 + e.deltaY * 0.001)));
     e.preventDefault();
   }, { passive: false });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') clearSelection();
+  });
 
-  // picking: hover tooltip, click panel, double-click fly
+  // picking: nodes first (bubbles never steal node clicks), then bubbles
   const raycaster = new THREE.Raycaster();
-  const tooltip = document.getElementById('tooltip');
-  const panel = document.getElementById('panel');
   const ndc = new THREE.Vector2();
-  const nodeAt = (e) => {
+  const pickAt = (e) => {
     ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
-    const hits = raycaster.intersectObjects(pickables, false);
-    return hits.length ? hits[0].object.userData.node : null;
+    const nodeHits = raycaster.intersectObjects([...state.nodeMeshes.values()], false);
+    if (nodeHits.length) return { node: nodeHits[0].object.userData.node };
+    const shellHits = raycaster.intersectObjects([...state.shellRims.values()], false);
+    if (shellHits.length) {
+      const container = shellHits[0].object.userData.containerId;
+      return { node: state.byId.get(container), shell: shellHits[0].object };
+    }
+    return null;
   };
+
+  // hover tooltip
+  const tooltip = document.getElementById('tooltip');
   dom.addEventListener('pointermove', (e) => {
-    const n = nodeAt(e);
-    if (n) {
+    if (drag && drag.moved > 2) { tooltip.style.display = 'none'; return; }
+    const hit = pickAt(e);
+    if (hit && hit.node) {
       tooltip.style.display = 'block';
       tooltip.style.left = (e.clientX + 14) + 'px';
       tooltip.style.top = (e.clientY + 14) + 'px';
-      tooltip.innerHTML = `<b>${n.name}</b> <span style="color:#7c8f99">${n.kind}</span>`;
+      tooltip.innerHTML = `<b>${hit.node.name}</b> <span style="color:#7c8f99">${hit.node.kind}</span>`;
       dom.style.cursor = 'pointer';
     } else {
       tooltip.style.display = 'none';
       dom.style.cursor = 'grab';
     }
   });
-  const renderPanel = (n) => {
-    const chain = [];
-    let cur = n.id;
-    const seen = new Set([cur]);
-    for (const l of data.links) {
-      if (CONT_LINKS.includes(l.type) && l.source === cur && !seen.has(l.target)) break;
-    }
-    // walk the containment chain upward
-    const up = new Map();
-    for (const l of data.links) {
-      if (CONT_LINKS.includes(l.type) && !up.has(l.source)) up.set(l.source, l.target);
-    }
-    while (up.has(cur) && !seen.has(up.get(cur))) {
-      cur = up.get(cur);
-      seen.add(cur);
-      chain.push(byId.get(cur)?.name || cur.split('/').pop());
-    }
-    const rels = [];
-    for (const l of data.links) {
-      if (l.source === n.id) rels.push(`${l.type} &#8594; ${byId.get(l.target)?.name || l.target.split('/').pop()}`);
-      else if (l.target === n.id) rels.push(`${l.type} &#8592; ${byId.get(l.source)?.name || l.source.split('/').pop()}`);
-    }
-    panel.innerHTML = `
-      <div class="kind">${n.kind}</div>
-      <h2>${n.name}</h2>
-      <div class="prov">provenance: ${n.provenance || '?'}</div>
-      <div class="desc">${n.description || ''}</div>
-      ${chain.length ? `<div class="section"><h3>Sits inside</h3><div>${chain.join(' &#8250; ')}</div></div>` : ''}
-      ${rels.length ? `<div class="section"><h3>Relations (${rels.length})</h3><div>${rels.slice(0, 24).join('<br>')}</div></div>` : ''}
-    `;
-    panel.classList.add('visible');
-  };
+
+  // selection: click selects (node or bubble), double-click flies in
+  const panel = document.getElementById('panel');
   let lastClick = 0;
+  let lastClickId = null;
   dom.addEventListener('click', (e) => {
     if (drag && drag.moved > 6) return;
-    const n = nodeAt(e);
+    const hit = pickAt(e);
     const now = performance.now();
-    if (n) {
-      if (now - lastClick < 350) {
-        const p = pos.get(n.id);
-        if (p) { target.set(p.x, p.y, p.z); dist = Math.min(dist, maxShell * 0.35); }
-      } else {
-        renderPanel(n);
-      }
+    if (hit && hit.node) {
+      const fly = (now - lastClick < 350 && lastClickId === hit.node.id);
+      selectNode(hit.node.id, { fly: fly || !!hit.shell, shell: hit.shell });
       lastClick = now;
+      lastClickId = hit.node.id;
     } else {
-      panel.classList.remove('visible');
+      clearSelection();
     }
+  });
+
+  // panel chips fly to their node
+  panel.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-node]');
+    if (el) selectNode(el.dataset.node, { fly: true });
   });
 
   window.addEventListener('resize', () => {
@@ -266,14 +306,138 @@ async function main() {
 
   const frame = () => {
     camera.position.set(
-      target.x + dist * Math.sin(phi) * Math.cos(theta),
-      target.y + dist * Math.cos(phi),
-      target.z + dist * Math.sin(phi) * Math.sin(theta));
+      target.x + state.dist * Math.sin(state.phi) * Math.cos(state.theta),
+      target.y + state.dist * Math.cos(state.phi),
+      target.z + state.dist * Math.sin(state.phi) * Math.sin(state.theta));
     camera.lookAt(target);
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   };
   frame();
+
+  // ---- selection machinery ----
+
+  function selectNode(id, { fly = false, shell = null } = {}) {
+    state.selected = id;
+    const n = state.byId.get(id);
+    // 1-hop neighborhood
+    const nb = new Set([id]);
+    for (const l of state.data.links) {
+      if (l.source === id) nb.add(l.target);
+      if (l.target === id) nb.add(l.source);
+    }
+    state.neighbors = nb;
+    // dim everything, light the neighborhood
+    for (const [nid, mesh] of state.nodeMeshes) {
+      const mat = mesh.material;
+      if (nid === id) mat.color.set('#ffffff');
+      else if (nb.has(nid)) mat.color.copy(mesh.userData.baseColor);
+      else mat.color.set('#22303a');
+    }
+    // highlight the 1-hop edges
+    if (state.selEdges) {
+      scene.remove(state.selEdges);
+      state.selEdges.geometry.dispose();
+      state.selEdges.material.dispose();
+    }
+    const pts = [];
+    for (const l of state.data.links) {
+      if (l.source !== id && l.target !== id) continue;
+      const a = pos.get(l.source);
+      const b = pos.get(l.target);
+      if (a && b) pts.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    }
+    if (pts.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      state.selEdges = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+        color: '#e8fbff', transparent: true, opacity: 0.95,
+      }));
+      scene.add(state.selEdges);
+    }
+    // boost the containing bubble's rim
+    for (const [cid, rim] of state.shellRims) {
+      rim.material.uniforms.uBoost.value = (cid === id) ? 2.2 : 1.0;
+    }
+    const containerOf = new Map();
+    for (const l of state.data.links) {
+      if (CONT_LINKS.includes(l.type) && !containerOf.has(l.source)) containerOf.set(l.source, l.target);
+    }
+    let cur = containerOf.get(id);
+    if (cur && state.shellRims.has(cur)) {
+      state.shellRims.get(cur).material.uniforms.uBoost.value = 1.9;
+    }
+    renderPanel(n);
+    // flight
+    const p = pos.get(id);
+    if (fly && p) {
+      target.set(p.x, p.y, p.z);
+      const mesh = state.nodeMeshes.get(id);
+      const scale = mesh ? mesh.scale.x : 8;
+      if (shell) state.dist = Math.max(120, shell.userData.radius * 2.4);
+      else state.dist = Math.min(state.dist, 150 + 30 * scale);
+    }
+  }
+
+  function clearSelection() {
+    state.selected = null;
+    state.neighbors = new Set();
+    for (const mesh of state.nodeMeshes.values()) {
+      mesh.material.color.copy(mesh.userData.baseColor);
+    }
+    if (state.selEdges) {
+      scene.remove(state.selEdges);
+      state.selEdges.geometry.dispose();
+      state.selEdges.material.dispose();
+      state.selEdges = null;
+    }
+    for (const rim of state.shellRims.values()) {
+      rim.material.uniforms.uBoost.value = 1.0;
+    }
+    panel.classList.remove('visible');
+  }
+
+  function renderPanel(n) {
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g,
+      (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const chain = [];
+    const up = new Map();
+    for (const l of state.data.links) {
+      if (CONT_LINKS.includes(l.type) && !up.has(l.source)) up.set(l.source, l.target);
+    }
+    let cur = n.id;
+    const seen = new Set([cur]);
+    while (up.has(cur) && !seen.has(up.get(cur))) {
+      cur = up.get(cur);
+      seen.add(cur);
+      chain.push(cur);
+    }
+    const rels = [];
+    for (const l of state.data.links) {
+      const label = REL_LABELS[l.type] || l.type;
+      if (l.source === n.id) {
+        const other = state.byId.get(l.target);
+        rels.push(`<div style="margin:2px 0"><span style="color:#7c8f99">${label} &#8594;</span> <span class="chip" data-node="${l.target}">${esc(other?.name || l.target.split('/').pop())}</span></div>`);
+      } else if (l.target === n.id) {
+        const other = state.byId.get(l.source);
+        rels.push(`<div style="margin:2px 0"><span style="color:#7c8f99">${label} &#8592;</span> <span class="chip" data-node="${l.source}">${esc(other?.name || l.source.split('/').pop())}</span></div>`);
+      }
+    }
+    panel.innerHTML = `
+      <div class="kind">${n.kind}</div>
+      <h2>${esc(n.name)}</h2>
+      <div class="prov">provenance: ${esc(n.provenance || '?')}</div>
+      <div class="desc">${esc(n.description || '')}</div>
+      ${chain.length ? `<div class="section"><h3>Sits inside</h3><div>${chain
+        .map((id) => `<span class="chip" data-node="${id}">${esc(state.byId.get(id)?.name || id.split('/').pop())}</span>`)
+        .join('<span style="color:#7c8f99"> &#8250; </span>')}</div></div>` : ''}
+      ${rels.length ? `<div class="section"><h3>Relations (${rels.length})</h3>${rels.slice(0, 40).join('')}${rels.length > 40 ? `<div style="color:#7c8f99;font-size:12px;margin-top:4px">+ ${rels.length - 40} more</div>` : ''}</div>` : ''}
+      <style>.chip { display:inline-block; background:#101c22; border:1px solid #23323a; border-radius:12px;
+        padding:2px 10px; margin:2px 4px 2px 0; cursor:pointer; font-size:12.5px; }
+        .chip:hover { border-color:#3ddc97; color:#3ddc97; }</style>
+    `;
+    panel.classList.add('visible');
+  }
 }
 
 main().catch((err) => {
