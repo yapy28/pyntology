@@ -86,6 +86,11 @@ def collect_nodes():
         if value not in nodes:
             nodes[value] = DATA + "value/" + slug(label)
 
+    # the builtins module itself: the anchor for definedIn edges
+    blt = sys.modules.get("builtins")
+    if blt is not None and blt not in nodes:
+        nodes[blt] = DATA + "module/builtins"
+
     # key runtime types from the types module: user-defined functions and
     # modules instantiate these, so they must exist in the ontology
     for name in ("FunctionType", "ModuleType", "MethodType", "CodeType"):
@@ -200,6 +205,8 @@ def main():
         g.add((builtins_mod, PY.instanceOf, modtype))
 
     for obj, iri in nodes.items():
+        if obj is sys.modules.get("builtins"):
+            continue  # minted explicitly below with its py:Module type
         s = URIRef(iri)
         g.add((s, PY.definedIn, builtins_mod))
         g.add((s, RDF.type, node_type(obj)))

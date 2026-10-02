@@ -61,6 +61,7 @@ KIND_RANK = {
     "Class": 3, "Property": 4, "Concept": 5,
 }
 HIER_LINKS = ("subclass", "subProperty", "broader", "imports",
+              "storedIn", "hostedIn",
               "instanceOf", "metaclassOf", "mroNext")
 
 GENERIC_TYPES = ", ".join(f"<{t}>" for t in
@@ -243,8 +244,9 @@ def load_ontologies(g: Graph):
     declarations in its file, so the build can add definedBy links."""
     loaded = []
     defined_by = {}
+    file_ontos = []  # (file stem, [ontology IRIs declared in that file])
     if not ONTO_DIR.exists():
-        return loaded, defined_by
+        return loaded, defined_by, file_ontos
     for f in sorted(ONTO_DIR.iterdir()):
         if f.suffix.lower() not in FORMATS or f.name.startswith("."):
             continue
@@ -267,8 +269,10 @@ def load_ontologies(g: Graph):
             for n in stamped:
                 defined_by.setdefault(n, []).extend(
                     o for o in onto_iris if o != n)
+        if onto_iris:
+            file_ontos.append((f.stem, onto_iris))
         loaded.append((f.name, len(gf), len(stamped)))
-    return loaded, defined_by
+    return loaded, defined_by, file_ontos
 
 
 def run_shacl(g: Graph):
@@ -306,11 +310,17 @@ def main():
     args = ap.parse_args()
 
     g = Graph()
+    vocab_ontos = []  # (file stem, [ontology IRIs declared in the file])
     for vf in sorted((ROOT / "vocabulary").glob("*.ttl")):
-        g.parse(str(vf), format="turtle")
+        vg = Graph()
+        vg.parse(str(vf), format="turtle")
+        ontos = [str(s) for s in vg.subjects(RDF.type, OWL.Ontology)]
+        if ontos:
+            vocab_ontos.append((vf.stem, ontos))
+        g += vg
     if args.with_collibra:
         g.parse(str(ROOT / "tmp" / "ootb-metamodel.ttl"), format="turtle")
-    loaded, defined_by = load_ontologies(g)
+    loaded, defined_by, file_ontos = load_ontologies(g)
     violations = run_shacl(g)
     print("mode:", "Collibra operating model + ontologies" if args.with_collibra
           else "ontologies only")
@@ -447,6 +457,37 @@ def main():
                     "unassigned": False, "val": 1,
                 }
         links.append({"source": s, "target": t, "type": "imports"})
+
+    # ---- the container layer: store > graphs > ontologies > nodes --------
+    # the onion made literal: everything loaded nests inside the store,
+    # each file is a graph inside it, each ontology is hosted in its graph,
+    # and every node hangs under its ontology (definedBy). Strata renders
+    # this containment chain in depth.
+    STORE_IRI = "https://colibri.example/data/store"
+
+    def container_node(iri, kind, name, desc):
+        return {
+            "id": iri, "kind": kind, "name": name, "labels": {},
+            "provenance": "container", "description": desc,
+            "product": "", "attrKind": "", "coRole": "",
+            "possibleValues": [], "unrestricted": False,
+            "unassigned": False, "towerLevel": None, "val": 1,
+        }
+
+    node_by_id[STORE_IRI] = container_node(
+        STORE_IRI, "Store", "loaded store",
+        "Everything this build loaded: graphs inside the store, ontologies "
+        "inside graphs, nodes inside ontologies.")
+    for stem, ontos in vocab_ontos + file_ontos:
+        gira = f"https://colibri.example/data/graph/{stem}"
+        node_by_id[gira] = container_node(
+            gira, "Graph", stem,
+            f"The named graph loaded from {stem}: the definitions it "
+            f"carries are hosted here.")
+        links.append({"source": gira, "target": STORE_IRI, "type": "storedIn"})
+        for o in ontos:
+            if o in node_by_id:
+                links.append({"source": o, "target": gira, "type": "hostedIn"})
 
     # SHACL validation results: red exception-event nodes, one per violation
     for i, (focus, source, msg) in enumerate(violations):

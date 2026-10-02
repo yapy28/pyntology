@@ -27,6 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HIER = ("subclass", "subProperty", "broader", "imports",
+                  "storedIn", "hostedIn",
         "instanceOf", "metaclassOf", "mroNext")
 
 

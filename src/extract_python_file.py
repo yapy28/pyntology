@@ -96,6 +96,12 @@ def ensure(g: Graph, obj) -> str | None:
         cls_iri = ensure(g, cls) if cls is not None else None
         if cls_iri:
             g.add((s, PY.instanceOf, URIRef(cls_iri)))
+        # anchor to the defining module (compile -> re, DictReader -> csv)
+        mod = sys.modules.get(getattr(obj, "__module__", "") or "")
+        if isinstance(mod, types_mod.ModuleType):
+            mod_iri = ensure(g, mod)
+            if mod_iri:
+                g.add((s, PY.definedIn, URIRef(mod_iri)))
         if isinstance(obj, type):
             for base in getattr(obj, "__bases__", ()):
                 base_iri = ensure(g, base)

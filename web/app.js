@@ -21,6 +21,8 @@ const COLORS = {
   Protocol: '#7cb518',
   Shape: '#ff7b00',
   Violation: '#ff006e',
+  Store: '#3a0ca3',
+  Graph: '#f6bd60',
   root: '#ff5d8f',
   dim: '#1c2b33',
   selected: '#ffffff',
@@ -33,8 +35,10 @@ const KIND_LABELS = {
   Metatype: 'metatype', Exception: 'exception', Value: 'value',
   Callable: 'callable', Module: 'module', Protocol: 'protocol',
   Shape: 'SHACL shape', Violation: 'violation',
+  Store: 'store', Graph: 'named graph',
 };
 const HIER_LINKS = ['subclass', 'subProperty', 'broader', 'imports',
+                    'storedIn', 'hostedIn',
                     'instanceOf', 'metaclassOf', 'mroNext'];
 const LINK_COLOR = {
   subclass: 'rgba(46, 196, 182, 0.55)',
@@ -59,6 +63,8 @@ const LINK_COLOR = {
   classConstraint: 'rgba(255, 123, 0, 0.4)',
   violationOf: 'rgba(255, 0, 110, 0.5)',
   violationAt: 'rgba(255, 0, 110, 0.45)',
+  storedIn: 'rgba(58, 12, 163, 0.45)',
+  hostedIn: 'rgba(246, 189, 96, 0.45)',
   assignedTo: 'rgba(255, 191, 105, 0.45)',
   head: 'rgba(199, 125, 255, 0.45)',
   tail: 'rgba(199, 125, 255, 0.45)',
@@ -82,6 +88,7 @@ const REL_LABELS = {
   targets: 'targets', property: 'property', path: 'path',
   hasValue: 'must include', classConstraint: 'must be a',
   violationOf: 'checked by', violationAt: 'violated at',
+  storedIn: 'stored in', hostedIn: 'hosted in',
 };
 
 function kindLabel(node) {
