@@ -414,7 +414,7 @@ async function main() {
     const now = performance.now();
     for (let i = state.dots.length - 1; i >= 0; i--) {
       const d = state.dots[i];
-      const p = Math.min(1, (now - d.t0) / d.dur);
+      const p = Math.max(0, Math.min(1, (now - d.t0) / d.dur));
       const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
       d.mesh.position.lerpVectors(d.from, d.to, ease);
       d.mesh.position.y += Math.sin(ease * Math.PI) * d.arc;
@@ -625,24 +625,37 @@ async function main() {
         mesh.material.color.set('#1c2b33');
       }
     }
-    // a traveling dot per flow edge, arcing through the bubble
-    const now = performance.now();
+    // traveling dots in two causal waves: everything flowing INTO the
+    // stage gathers first, then what the stage produces fires out -
+    // reads as cause then effect instead of a scatter
+    const stageDur = (st.dur || 1.4) * 1000 / state.speed;
+    const incoming = [];
+    const outgoing = [];
     for (const [s, t] of st.edges || []) {
-      const a = pos.get(s);
-      const b = pos.get(t);
-      if (!a || !b) continue;
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(2.6, 10, 8),
-        new THREE.MeshBasicMaterial({ color: '#3ddc97' }));
-      mesh.raycast = () => {};
-      scene.add(mesh);
-      const from = new THREE.Vector3(a.x, a.y, a.z);
-      const to = new THREE.Vector3(b.x, b.y, b.z);
-      state.dots.push({
-        mesh, t0: now, dur: (st.dur || 1.4) * 1000 / state.speed,
-        from, to, arc: 0.1 * from.distanceTo(to),
-      });
+      if (t === st.id) incoming.push([s, t]);
+      else outgoing.push([s, t]);
     }
+    const spawnDots = (pairs, t0, dur) => {
+      for (const [s, t] of pairs) {
+        const a = pos.get(s);
+        const b = pos.get(t);
+        if (!a || !b) continue;
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(4.2, 12, 10),
+          new THREE.MeshBasicMaterial({ color: '#5cf1b4' }));
+        mesh.raycast = () => {};
+        scene.add(mesh);
+        const from = new THREE.Vector3(a.x, a.y, a.z);
+        const to = new THREE.Vector3(b.x, b.y, b.z);
+        state.dots.push({
+          mesh, t0, dur, from, to,
+          arc: 0.1 * from.distanceTo(to),
+        });
+      }
+    };
+    const now = performance.now();
+    spawnDots(incoming, now, stageDur * 0.5);
+    spawnDots(outgoing, now + stageDur * 0.45, stageDur * 0.55);
     // output produced: pulse it green, keep it marked until Esc
     if (st.pulse && st.pulseNode && state.nodeMeshes.has(st.pulseNode)) {
       const mesh = state.nodeMeshes.get(st.pulseNode);
