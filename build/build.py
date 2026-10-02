@@ -468,22 +468,22 @@ def main():
     def container_node(iri, kind, name, desc):
         return {
             "id": iri, "kind": kind, "name": name, "labels": {},
-            "provenance": "container", "description": desc,
+            "provenance": "runtime", "description": desc,
             "product": "", "attrKind": "", "coRole": "",
             "possibleValues": [], "unrestricted": False,
             "unassigned": False, "towerLevel": None, "val": 1,
         }
 
     node_by_id[STORE_IRI] = container_node(
-        STORE_IRI, "Store", "loaded store",
-        "Everything this build loaded: graphs inside the store, ontologies "
-        "inside graphs, nodes inside ontologies.")
+        STORE_IRI, "Store", "runtime",
+        "The running Python world: packages in the runtime, namespaces "
+        "in packages, definitions in namespaces.")
     for stem, ontos in vocab_ontos + file_ontos:
         gira = f"https://colibri.example/data/graph/{stem}"
         node_by_id[gira] = container_node(
             gira, "Graph", stem,
-            f"The named graph loaded from {stem}: the definitions it "
-            f"carries are hosted here.")
+            f"The package loaded from {stem}: everything it defines lives "
+            f"here.")
         links.append({"source": gira, "target": STORE_IRI, "type": "storedIn"})
         for o in ontos:
             if o in node_by_id:

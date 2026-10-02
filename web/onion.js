@@ -29,6 +29,20 @@ const EDGE_COLORS = {
   domain: '#e07a5f', range: '#e07a5f', inverseOf: '#7c8f99',
 };
 const CONT_LINKS = ['definedBy', 'definedIn', 'hostedIn', 'storedIn'];
+// the Python dialect: kinds display in Python's own words, not RDF's
+const KIND_LABELS = {
+  Store: 'runtime', Graph: 'package', Ontology: 'namespace',
+  Vocabulary: 'taxonomy', Shape: 'invariant', Module: 'module',
+  Value: 'value', Callable: 'callable', Class: 'class', Type: 'class',
+  Metatype: 'metatype', Exception: 'exception', Protocol: 'protocol',
+  Concept: 'concept', Property: 'property', Violation: 'violation',
+};
+const kindLabel = (n) => KIND_LABELS[n.kind] || n.kind.toLowerCase();
+const fromLabel = (p) => {
+  if (p === 'runtime' || p === 'container') return 'the runtime';
+  if (p === 'ghost') return 'not loaded';
+  return p || '?';
+};
 const REL_LABELS = {
   instanceOf: 'instance of', subclassOf: 'subclass of',
   subProperty: 'subproperty of', mroNext: 'next in MRO',
@@ -42,7 +56,7 @@ const REL_LABELS = {
   targets: 'targets', property: 'property', path: 'path',
   hasValue: 'must include', classConstraint: 'must be a',
   violationOf: 'checked by', violationAt: 'violated at',
-  storedIn: 'stored in', hostedIn: 'hosted in',
+  storedIn: 'loaded into', hostedIn: 'declared in',
 };
 
 const FRESNEL_VERT = `
@@ -194,9 +208,9 @@ async function main() {
   const kinds = [...new Set(data.nodes.map((n) => n.kind))];
   document.getElementById('legend').innerHTML =
     Object.entries(SHELL_COLORS).map(([k, c]) =>
-      `<div><span class="dot" style="background:${c};opacity:.85"></span>${k.toLowerCase()} bubble (clickable)</div>`).join('')
+      `<div><span class="dot" style="background:${c};opacity:.85"></span>${kindLabel({ kind: k })} bubble (clickable)</div>`).join('')
     + kinds.map((k) =>
-      `<div><span class="dot" style="background:${NODE_COLORS[k] || '#7c8f99'}"></span>${k.toLowerCase()}</div>`).join('');
+      `<div><span class="dot" style="background:${NODE_COLORS[k] || '#7c8f99'}"></span>${kindLabel({ kind: k })}</div>`).join('');
 
   // search
   const dl = document.createElement('datalist');
@@ -424,9 +438,9 @@ async function main() {
       }
     }
     panel.innerHTML = `
-      <div class="kind">${n.kind}</div>
+      <div class="kind">${kindLabel(n)}</div>
       <h2>${esc(n.name)}</h2>
-      <div class="prov">provenance: ${esc(n.provenance || '?')}</div>
+      <div class="prov">from: ${esc(fromLabel(n.provenance))}</div>
       <div class="desc">${esc(n.description || '')}</div>
       ${chain.length ? `<div class="section"><h3>Sits inside</h3><div>${chain
         .map((id) => `<span class="chip" data-node="${id}">${esc(state.byId.get(id)?.name || id.split('/').pop())}</span>`)
