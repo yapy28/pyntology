@@ -35,7 +35,7 @@ const CONT_LINKS = ['definedBy', 'definedIn', 'hostedIn', 'storedIn'];
 const KIND_LABELS = {
   Store: 'runtime', Graph: 'package', Ontology: 'namespace',
   Vocabulary: 'taxonomy', Shape: 'invariant', Module: 'module',
-  Value: 'value', Callable: 'callable', Class: 'class', Type: 'class',
+  Value: 'value', Callable: 'function', Class: 'class', Type: 'class',
   Metatype: 'metatype', Exception: 'exception', Protocol: 'protocol',
   Concept: 'concept', Property: 'property', Violation: 'violation',
   Variable: 'variable',

@@ -34,7 +34,7 @@ const KIND_LABELS = {
   RelationType: 'relation type', Ontology: 'ontology', Class: 'class',
   Property: 'property', Concept: 'concept', Vocabulary: 'vocabulary',
   Metatype: 'metatype', Exception: 'exception', Value: 'value',
-  Callable: 'callable', Module: 'module', Protocol: 'protocol',
+  Callable: 'function', Module: 'module', Protocol: 'protocol',
   Shape: 'SHACL shape', Violation: 'violation',
   Store: 'store', Graph: 'named graph', Variable: 'variable',
 };
