@@ -477,7 +477,67 @@ function onionLayout(nodes, links) {
     const d = fib(i, unplaced.length);
     pos.set(n.id, { x: d.x * outerR, y: d.y * outerR, z: d.z * outerR });
   });
-  return pos;
+
+  // containment shells: one sphere per container, sized to its children
+  const kindById = new Map(nodes.map((n) => [n.id, n.kind]));
+  const shells = [];
+  for (const [parent, kids] of childrenOf) {
+    const base = pos.get(parent);
+    if (!base || !kids.length) continue;
+    const kind = kindById.get(parent);
+    if (!['Store', 'Graph', 'Ontology', 'Module'].includes(kind)) continue;
+    let r = 0;
+    for (const c of kids) {
+      const cp = pos.get(c);
+      if (cp) {
+        r = Math.max(r, Math.hypot(cp.x - base.x, cp.y - base.y, cp.z - base.z));
+      }
+    }
+    if (r > 0) shells.push({ id: parent, center: base, radius: r + 70, kind });
+  }
+  return { pos, shells };
+}
+
+// translucent containment spheres drawn around each container in onion mode
+const SHELL_COLORS = { Store: '#3a0ca3', Graph: '#f6bd60', Ontology: '#4361ee', Module: '#90be6d' };
+let shellGroup = null;
+
+function buildShells(shells) {
+  clearShells();
+  if (!window.THREE || !shells || !shells.length) {
+    if (!window.THREE) {
+      document.getElementById('hint').textContent =
+        'onion: three.js not loaded - showing clusters without shells';
+    }
+    return;
+  }
+  shellGroup = new window.THREE.Group();
+  for (const s of shells) {
+    const geo = new window.THREE.SphereGeometry(s.radius, 36, 24);
+    const mat = new window.THREE.MeshBasicMaterial({
+      color: SHELL_COLORS[s.kind] || '#7c8f99',
+      transparent: true,
+      opacity: 0.06,
+      side: window.THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new window.THREE.Mesh(geo, mat);
+    mesh.position.set(s.center.x, s.center.y, s.center.z);
+    mesh.raycast = () => {}; // shells must never steal node clicks
+    mesh.renderOrder = -1;  // draw behind the nodes
+    shellGroup.add(mesh);
+  }
+  state.fg.scene().add(shellGroup);
+}
+
+function clearShells() {
+  if (!shellGroup) return;
+  shellGroup.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+  state.fg.scene().remove(shellGroup);
+  shellGroup = null;
 }
 
 function setMode(mode) {
@@ -488,21 +548,26 @@ function setMode(mode) {
   });
 
   if (mode === 'onion') {
-    const positions = onionLayout(state.graph.nodes, state.graph.links);
+    const { pos, shells } = onionLayout(state.graph.nodes, state.graph.links);
     for (const n of state.graph.nodes) {
-      const p = positions.get(n.id);
+      const p = pos.get(n.id);
       if (p) { n.x = p.x; n.y = p.y; n.z = p.z; }
     }
     state.fg.dagMode(null)
       .graphData({ nodes: state.graph.nodes, links: state.graph.links })
       .cooldownTicks(0)
       .refresh();
+    buildShells(shells);
     document.getElementById('hint').textContent =
       'onion: the store at the center, graphs around it, ontologies inside, entities innermost';
-    state.fg.cameraPosition({ x: 0, y: 0, z: 1800 }, { x: 0, y: 0, z: 0 }, 1200);
+    const maxShell = shells.reduce((a, s) => Math.max(a, s.radius), 0);
+    state.fg.cameraPosition(
+      { x: 0, y: 0, z: Math.max(1800, maxShell * 3.2) },
+      { x: 0, y: 0, z: 0 }, 1200);
     return;
   }
 
+  clearShells();
   state.fg.cooldownTicks(Infinity);
   const links = mode === 'strata'
     ? state.graph.links.filter((l) => HIER_LINKS.includes(l.type))

@@ -24,15 +24,16 @@ WEB = ROOT / "web"
 DEFAULT_GRAPH = WEB / "graph.json"
 DEFAULT_OUT = ROOT / "dist" / "colibri.html"
 LIB_URL = "https://unpkg.com/3d-force-graph"
+THREE_URL = "https://unpkg.com/three@0.160.0/build/three.min.js"
 
 
-def fetch_lib() -> str:
-    req = urllib.request.Request(LIB_URL,
+def fetch_url(url: str) -> str:
+    """GET with certificate verification; falls back to an unverified
+    context when a corporate TLS-intercepting proxy breaks verification."""
+    req = urllib.request.Request(url,
                                  headers={"User-Agent": "colibri-export/0.1"})
 
     def open_unverified():
-        # corporate TLS interception: Python does not use the Windows cert
-        # store, so proxy-signed certificates fail verification
         return urllib.request.urlopen(
             req, timeout=60, context=ssl._create_unverified_context())
 
@@ -40,12 +41,16 @@ def fetch_lib() -> str:
         return urllib.request.urlopen(req, timeout=60).read().decode("utf-8")
     except urllib.error.URLError as err:
         if isinstance(getattr(err, "reason", None), ssl.SSLError):
-            print("certificate verification failed; retrying without "
-                  "verification (corporate TLS interception?)")
+            print(f"certificate verification failed ({url}); retrying "
+                  f"without verification (corporate TLS interception?)")
             return open_unverified().read().decode("utf-8")
         raise
     except ssl.SSLError:
         return open_unverified().read().decode("utf-8")
+
+
+def fetch_lib() -> str:
+    return fetch_url(LIB_URL)
 
 
 def data_uri(path: Path, mime: str) -> str:
@@ -69,7 +74,9 @@ def main():
         raise SystemExit(f"missing {graph_path} - run build.py first")
 
     lib = fetch_lib()
-    for blob, what in ((lib, "3d-force-graph library"),):
+    three = fetch_url(THREE_URL)
+    for blob, what in ((lib, "3d-force-graph library"),
+                       (three, "three.js")):
         if "</script" in blob:
             raise SystemExit(f"cannot inline {what}: contains '</script'")
 
@@ -89,6 +96,9 @@ def main():
     html = must_replace(
         '<script src="https://unpkg.com/3d-force-graph"></script>',
         f"<script>\n{lib}\n</script>", "library script tag")
+    html = must_replace(
+        '<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>',
+        f"<script>\n{three}\n</script>", "three.js script tag")
     html = must_replace(
         '<script src="app.js"></script>',
         f"<script>window.COLOBRI_GRAPH = {graph_safe};</script>\n"
