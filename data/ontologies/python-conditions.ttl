@@ -1,0 +1,162 @@
+@prefix py:      <https://colibri.example/ns/py#> .
+@prefix pycond: <https://colibri.example/ns/py/cond#> .
+@prefix pytype: <https://colibri.example/data/python/builtin/type/> .
+@prefix pycall: <https://colibri.example/data/python/builtin/callable/> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+
+<https://colibri.example/ns/py/conditions> a owl:Ontology ;
+  dcterms:title "Python error conditions and callable categories"@en ;
+  owl:imports <https://colibri.example/ns/py/callable> ;
+  rdfs:comment """The SKOS layer of the Python ontology: what an exception MEANS.
+Failure conditions and callable categories are concepts in controlled
+vocabularies - the same pattern as a SKOS enumeration restricting a field -
+and callable contracts reference them: len requires its argument to be
+sized, and raises TypeError when it is not. Hand-curated for the builtins
+slice; introspection cannot see semantics, only the docs can."""@en .
+
+## ---- failure conditions ---------------------------------------------------
+
+<https://colibri.example/ns/py/conditions/failure-conditions> a skos:ConceptScheme ;
+  skos:prefLabel "Python failure conditions"@en .
+
+pycond:invalid-call a skos:Concept ;
+  skos:prefLabel "invalid call"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The call cannot be carried out at all: wrong number or shape of arguments."@en .
+
+pycond:argument-shape-violation a skos:Concept ;
+  skos:prefLabel "argument shape violation"@en ;
+  skos:broader pycond:invalid-call ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "An argument does not have the shape the callable requires."@en .
+
+pycond:not-sized a skos:Concept ;
+  skos:prefLabel "not sized"@en ;
+  skos:broader pycond:argument-shape-violation ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The argument does not satisfy the Sized protocol: it has no __len__ method."@en .
+
+pycond:not-iterable a skos:Concept ;
+  skos:prefLabel "not iterable"@en ;
+  skos:broader pycond:argument-shape-violation ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The argument does not satisfy the Iterable protocol: it has no __iter__ method."@en .
+
+pycond:unparseable-literal a skos:Concept ;
+  skos:prefLabel "unparseable literal"@en ;
+  skos:broader pycond:invalid-call ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "A literal that cannot be converted to the target type."@en .
+
+pycond:io-failure a skos:Concept ;
+  skos:prefLabel "I/O failure"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "An operation on the outside world (files, streams, devices) failed."@en .
+
+pycond:unopenable-path a skos:Concept ;
+  skos:prefLabel "unopenable path"@en ;
+  skos:broader pycond:io-failure ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The file or directory at the given path does not exist, or cannot be opened."@en .
+
+pycond:iterator-exhausted a skos:Concept ;
+  skos:prefLabel "iterator exhausted"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The iterator has no items left to yield."@en .
+
+## ---- success preconditions (the positive mirror) ---------------------------
+
+pycond:argument-is-sized a skos:Concept ;
+  skos:prefLabel "argument is sized"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The argument satisfies the Sized protocol: it has a __len__ method."@en .
+
+pycond:argument-is-iterable a skos:Concept ;
+  skos:prefLabel "argument is iterable"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The argument satisfies the Iterable protocol: it has an __iter__ method."@en .
+
+pycond:parseable-literal a skos:Concept ;
+  skos:prefLabel "parseable literal"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The literal can be converted to the target type."@en .
+
+pycond:openable-path a skos:Concept ;
+  skos:prefLabel "openable path"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/failure-conditions> ;
+  skos:definition "The path exists and the file can be opened."@en .
+
+## ---- callable categories (vocabulary-restricted attribute) ----------------
+
+<https://colibri.example/ns/py/conditions/callable-categories> a skos:ConceptScheme ;
+  skos:prefLabel "Python callable categories"@en .
+
+pycond:pure-function a skos:Concept ;
+  skos:prefLabel "pure function"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/callable-categories> ;
+  skos:definition "No side effects; the result depends only on the arguments."@en .
+
+pycond:io-function a skos:Concept ;
+  skos:prefLabel "I/O function"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/callable-categories> ;
+  skos:definition "Touches the outside world: files, streams, the console."@en .
+
+pycond:introspection a skos:Concept ;
+  skos:prefLabel "introspection"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/callable-categories> ;
+  skos:definition "Answers questions about objects themselves: types, attributes, identity."@en .
+
+pycond:conversion a skos:Concept ;
+  skos:prefLabel "conversion"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/callable-categories> ;
+  skos:definition "Converts values between types or representations."@en .
+
+pycond:collection-op a skos:Concept ;
+  skos:prefLabel "collection operation"@en ;
+  skos:inScheme <https://colibri.example/ns/py/conditions/callable-categories> ;
+  skos:definition "Traverses, aggregates or recombines collections."@en .
+
+## ---- hand-curated contracts for the builtins --------------------------------
+
+pycall:len py:precondition pycond:argument-is-sized ;
+  py:raisesWhen pycond:not-sized ;
+  py:raises pytype:typeerror ;
+  py:callCategory pycond:pure-function .
+
+pycall:iter py:precondition pycond:argument-is-iterable ;
+  py:raisesWhen pycond:not-iterable ;
+  py:raises pytype:typeerror ;
+  py:callCategory pycond:collection-op .
+
+pycall:next py:raisesWhen pycond:iterator-exhausted ;
+  py:raises pytype:stopiteration ;
+  py:callCategory pycond:collection-op .
+
+pycall:int py:precondition pycond:parseable-literal ;
+  py:raisesWhen pycond:unparseable-literal ;
+  py:raises pytype:valueerror ;
+  py:callCategory pycond:conversion .
+
+pycall:open py:precondition pycond:openable-path ;
+  py:raisesWhen pycond:unopenable-path ;
+  py:raises pytype:filenotfounderror , pytype:oserror ;
+  py:callCategory pycond:io-function .
+
+pycall:sorted py:callCategory pycond:pure-function .
+pycall:sum py:callCategory pycond:collection-op .
+pycall:print py:callCategory pycond:io-function .
+pycall:repr py:callCategory pycond:conversion .
+pycall:str py:callCategory pycond:conversion .
+pycall:ord py:callCategory pycond:conversion .
+pycall:chr py:callCategory pycond:conversion .
+pycall:isinstance py:callCategory pycond:introspection .
+pycall:callable py:callCategory pycond:introspection .
+pycall:hash py:callCategory pycond:introspection .
+pycall:id py:callCategory pycond:introspection .
+pycall:dir py:callCategory pycond:introspection .
+pycall:vars py:callCategory pycond:introspection .
+pycall:getattr py:callCategory pycond:introspection .
+pycall:setattr py:callCategory pycond:introspection .

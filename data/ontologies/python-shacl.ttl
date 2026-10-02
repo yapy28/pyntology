@@ -1,0 +1,105 @@
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix py:      <https://colibri.example/ns/py#> .
+@prefix pyshape: <https://colibri.example/ns/py/shape#> .
+@prefix pytype:  <https://colibri.example/data/python/builtin/type/> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+
+<https://colibri.example/ns/py/shapes> a owl:Ontology ;
+  dcterms:title "Python invariants as SHACL shapes"@en ;
+  owl:imports <https://colibri.example/ns/py/core> ;
+  rdfs:comment """SHACL is where the closed-world checks live: OWL carries the open class
+lattice, SHACL carries the constraints that must hold for the graph to be
+a faithful model of Python. Each shape is a bubble that has eaten the
+nodes it constrains: target a class and every instance of that class sits
+inside the shape's reach. These shapes state Python's actual invariants -
+the tower's ground floor, the exception family, the module anchoring."""@en .
+
+## ---- the tower's ground floor: every value has exactly one type -----------
+
+pyshape:ValueShape a sh:NodeShape ;
+  rdfs:label "value shape"@en ;
+  rdfs:comment "Every value is an instance of exactly one type - the ground floor of the tower."@en ;
+  sh:targetClass py:Value ;
+  sh:property pyshape:ValueHasExactlyOneType .
+
+pyshape:ValueHasExactlyOneType a sh:PropertyShape ;
+  rdfs:label "exactly one type"@en ;
+  sh:path py:instanceOf ;
+  sh:minCount 1 ;
+  sh:maxCount 1 .
+
+## ---- the tower closes: every type is instantiated somewhere ---------------
+
+pyshape:TypeShape a sh:NodeShape ;
+  rdfs:label "type shape"@en ;
+  rdfs:comment "Every type is itself an object: an instance of some metatype. The tower has no dangling floor."@en ;
+  sh:targetClass py:Type ;
+  sh:property pyshape:TypeIsInstantiated .
+
+pyshape:TypeIsInstantiated a sh:PropertyShape ;
+  rdfs:label "is instantiated"@en ;
+  sh:path py:instanceOf ;
+  sh:minCount 1 .
+
+## ---- every type reaches object through the lattice -------------------------
+
+pyshape:TypeReachesObject a sh:NodeShape ;
+  rdfs:label "types reach object"@en ;
+  rdfs:comment "Every type is a subclass of object, directly or through the linearized lattice."@en ;
+  sh:targetClass py:Type ;
+  sh:property pyshape:SubclassClosureReachesObject .
+
+pyshape:SubclassClosureReachesObject a sh:PropertyShape ;
+  rdfs:label "subclass closure reaches object"@en ;
+  sh:path [ sh:zeroOrMorePath py:subclassOf ] ;
+  sh:hasValue pytype:object .
+
+## ---- the exception family is closed ---------------------------------------
+
+pyshape:ExceptionShape a sh:NodeShape ;
+  rdfs:label "exception shape"@en ;
+  rdfs:comment "Every exception derives from BaseException through the subclass lattice - the family is closed."@en ;
+  sh:targetClass py:Exception ;
+  sh:property pyshape:ExceptionDerivesFromBaseException .
+
+pyshape:ExceptionDerivesFromBaseException a sh:PropertyShape ;
+  rdfs:label "derives from BaseException"@en ;
+  sh:path [ sh:zeroOrMorePath py:subclassOf ] ;
+  sh:hasValue pytype:baseexception .
+
+## ---- callables are anchored in modules ------------------------------------
+
+pyshape:CallableShape a sh:NodeShape ;
+  rdfs:label "callable shape"@en ;
+  rdfs:comment "Every callable is defined in exactly one module: nothing floats free in a file's world."@en ;
+  sh:targetClass py:Callable ;
+  sh:property pyshape:CallableDefinedInModule .
+
+pyshape:CallableDefinedInModule a sh:PropertyShape ;
+  rdfs:label "defined in a module"@en ;
+  sh:path py:definedIn ;
+  sh:minCount 1 .
+
+## ---- contracts reference real conditions ----------------------------------
+
+pyshape:RaisesWhenIsConcept a sh:NodeShape ;
+  rdfs:label "failure conditions are concepts"@en ;
+  rdfs:comment "Whatever a callable raises-when must be a concept from the conditions vocabulary - semantics cannot point at arbitrary data."@en ;
+  sh:targetObjectsOf py:raisesWhen ;
+  sh:class skos:Concept .
+
+## ---- concepts live in schemes ------------------------------------------------
+
+pyshape:ConceptInSchemeShape a sh:NodeShape ;
+  rdfs:label "concept shape"@en ;
+  rdfs:comment "Every concept belongs to a scheme - a concept without a vocabulary is a stray."@en ;
+  sh:targetClass skos:Concept ;
+  sh:property pyshape:ConceptHasScheme .
+
+pyshape:ConceptHasScheme a sh:PropertyShape ;
+  rdfs:label "in a scheme"@en ;
+  sh:path skos:inScheme ;
+  sh:minCount 1 .
