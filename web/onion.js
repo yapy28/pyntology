@@ -31,6 +31,11 @@ const EDGE_COLORS = {
   flowIn: '#3ddc97', flowOut: '#3ddc97', binds: '#ffd166',
 };
 const CONT_LINKS = ['definedBy', 'definedIn', 'hostedIn', 'storedIn'];
+// structural "is a / lives in" links: the ontology skeleton a node stands on
+const STRUCT_LINKS = new Set([
+  'instanceOf', 'subclass', 'subProperty', 'broader', 'mroNext',
+  'metaclassOf', 'definedIn', 'definedBy', 'hostedIn', 'storedIn',
+]);
 // the Python dialect: kinds display in Python's own words, not RDF's
 const KIND_LABELS = {
   Store: 'runtime', Graph: 'package', Ontology: 'namespace',
@@ -612,6 +617,15 @@ async function main() {
     for (const id of cast) {
       if (state.nodeMeshes.has(id)) state.runVisited.add(id);
     }
+    // the ground: structural neighbors of the cast (the types, parents
+    // and containers its nodes stand on) glow faintly, so tuple, Path
+    // or the module light up when the stage uses what they describe
+    const ground = new Set();
+    for (const l of state.data.links) {
+      if (!STRUCT_LINKS.has(l.type)) continue;
+      if (cast.has(l.source) && state.nodeMeshes.has(l.target)) ground.add(l.target);
+      if (cast.has(l.target) && state.nodeMeshes.has(l.source)) ground.add(l.source);
+    }
     for (const [nid, mesh] of state.nodeMeshes) {
       if (state.runMarked.includes(nid)) continue;  // outputs stay green
       if (nid === st.id) mesh.material.color.set('#ffffff');
@@ -621,6 +635,10 @@ async function main() {
         // the trail: touched by earlier stages, still colored
         mesh.material.color.copy(mesh.userData.baseColor)
           .multiplyScalar(0.65);
+      } else if (ground.has(nid)) {
+        // the ground: what the current stage's nodes ARE
+        mesh.material.color.copy(mesh.userData.baseColor)
+          .multiplyScalar(0.35);
       } else {
         mesh.material.color.set('#1c2b33');
       }
