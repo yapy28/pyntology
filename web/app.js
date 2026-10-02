@@ -387,10 +387,123 @@ function renderPanel(node) {
   });
 }
 
+// The onion layout: bubble within bubble. Every node's containment chain
+// (definedIn/definedBy -> module/ontology -> hostedIn -> graph -> storedIn
+// -> store) determines its place: the store sits at the center, graphs
+// form a cluster around it, ontologies nest inside their graph, entities
+// nest inside their ontology. Unchained nodes float on the outer shell.
+function onionLayout(nodes, links) {
+  const CONT = new Set(['definedBy', 'definedIn', 'hostedIn', 'storedIn']);
+  const containerOf = new Map();
+  for (const l of links) {
+    if (CONT.has(l.type) && !containerOf.has(l.source)) {
+      containerOf.set(l.source, l.target);
+    }
+  }
+  const store = nodes.find((n) => n.kind === 'Store');
+  const storeId = store ? store.id : null;
+
+  const pos = new Map();
+  if (storeId) pos.set(storeId, { x: 0, y: 0, z: 0 });
+
+  const childrenOf = new Map();
+  for (const [child, parent] of containerOf) {
+    if (!childrenOf.has(parent)) childrenOf.set(parent, []);
+    childrenOf.get(parent).push(child);
+  }
+
+  // subtree sizes drive cluster radii
+  const subSize = new Map();
+  const sizeOf = (id, seen = new Set()) => {
+    if (subSize.has(id)) return subSize.get(id);
+    if (seen.has(id)) return 1;
+    seen.add(id);
+    let n = 1;
+    for (const c of childrenOf.get(id) || []) n += sizeOf(c, seen);
+    subSize.set(id, n);
+    return n;
+  };
+  for (const n of nodes) sizeOf(n.id);
+
+  const fib = (i, n) => {
+    const phi = Math.acos(1 - (2 * (i + 0.5)) / Math.max(1, n));
+    const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
+    return {
+      x: Math.cos(theta) * Math.sin(phi),
+      y: Math.sin(theta) * Math.sin(phi),
+      z: Math.cos(phi),
+    };
+  };
+
+  // rescue pass: namespaces with children but NO container of their own
+  // (e.g. a file's module) get their own shell around the store. Nodes that
+  // do have a container wait for the BFS to place them inside it.
+  const orphans = [...childrenOf.keys()]
+    .filter((id) => !pos.has(id) && !containerOf.has(id));
+  orphans.forEach((id, i) => {
+    const d = fib(i, orphans.length + 1);
+    pos.set(id, { x: d.x * 420, y: d.y * 420, z: d.z * 420 });
+  });
+
+  // BFS placement: children on fibonacci spheres around their parent
+  const queue = [storeId, ...orphans].filter(Boolean);
+  while (queue.length) {
+    const parent = queue.shift();
+    const base = pos.get(parent);
+    if (!base) continue;
+    const kids = (childrenOf.get(parent) || []).slice()
+      .sort((a, b) => (subSize.get(b) || 1) - (subSize.get(a) || 1));
+    const total = kids.reduce((a, c) => a + (subSize.get(c) || 1), 0);
+    const r = Math.max(80, Math.sqrt(Math.max(1, total)) * 28);
+    kids.forEach((child, i) => {
+      if (pos.has(child)) return;
+      const d = fib(i, kids.length);
+      const rr = r * (0.9 + Math.random() * 0.25);
+      pos.set(child, {
+        x: base.x + d.x * rr,
+        y: base.y + d.y * rr,
+        z: base.z + d.z * rr,
+      });
+      queue.push(child);
+    });
+  }
+
+  // unchained nodes float on the outermost shell around everything
+  const unplaced = nodes.filter((n) => !pos.has(n.id));
+  let maxR = 0;
+  for (const p of pos.values()) maxR = Math.max(maxR, Math.hypot(p.x, p.y, p.z));
+  const outerR = maxR + 300;
+  unplaced.forEach((n, i) => {
+    const d = fib(i, unplaced.length);
+    pos.set(n.id, { x: d.x * outerR, y: d.y * outerR, z: d.z * outerR });
+  });
+  return pos;
+}
+
 function setMode(mode) {
   state.mode = mode;
-  document.getElementById('mode-free').classList.toggle('active', mode === 'free');
-  document.getElementById('mode-strata').classList.toggle('active', mode === 'strata');
+  ['free', 'strata', 'onion'].forEach((m) => {
+    const btn = document.getElementById(`mode-${m}`);
+    if (btn) btn.classList.toggle('active', mode === m);
+  });
+
+  if (mode === 'onion') {
+    const positions = onionLayout(state.graph.nodes, state.graph.links);
+    for (const n of state.graph.nodes) {
+      const p = positions.get(n.id);
+      if (p) { n.x = p.x; n.y = p.y; n.z = p.z; }
+    }
+    state.fg.dagMode(null)
+      .graphData({ nodes: state.graph.nodes, links: state.graph.links })
+      .cooldownTicks(0)
+      .refresh();
+    document.getElementById('hint').textContent =
+      'onion: the store at the center, graphs around it, ontologies inside, entities innermost';
+    state.fg.cameraPosition({ x: 0, y: 0, z: 1800 }, { x: 0, y: 0, z: 0 }, 1200);
+    return;
+  }
+
+  state.fg.cooldownTicks(Infinity);
   const links = mode === 'strata'
     ? state.graph.links.filter((l) => HIER_LINKS.includes(l.type))
     : state.graph.links;
@@ -491,16 +604,18 @@ async function init() {
     sizeState.rel = Math.max(1.5, sizeState.rel - 2);
     state.fg.nodeRelSize(sizeState.rel);
   });
-  bindStepper('space-up', () => {
-    sizeState.dist = Math.min(500, sizeState.dist + 25);
-    state.fg.d3Force('link').distance(sizeState.dist);
+  // spacing adjusts every layout knob, so it works in free AND strata mode
+  const setSpacing = (d) => {
+    sizeState.dist = d;
+    const link = state.fg.d3Force('link');
+    if (link && link.distance) link.distance(d);
+    const charge = state.fg.d3Force('charge');
+    if (charge && charge.strength) charge.strength(-Math.max(60, d * 1.2));
+    state.fg.dagLevelDistance(Math.max(20, Math.round(d / 2)));
     state.fg.d3Reheat();
-  });
-  bindStepper('space-down', () => {
-    sizeState.dist = Math.max(15, sizeState.dist - 25);
-    state.fg.d3Force('link').distance(sizeState.dist);
-    state.fg.d3Reheat();
-  });
+  };
+  bindStepper('space-up', () => setSpacing(Math.min(500, sizeState.dist + 25)));
+  bindStepper('space-down', () => setSpacing(Math.max(15, sizeState.dist - 25)));
 
   motionBtn.addEventListener('click', () => {
     motionOn = !motionOn;
@@ -535,6 +650,7 @@ async function init() {
 
   document.getElementById('mode-free').addEventListener('click', () => setMode('free'));
   document.getElementById('mode-strata').addEventListener('click', () => setMode('strata'));
+  document.getElementById('mode-onion').addEventListener('click', () => setMode('onion'));
 
   const search = document.getElementById('search');
   search.addEventListener('keydown', (e) => {
