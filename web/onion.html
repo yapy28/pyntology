@@ -28,13 +28,15 @@
     border-radius: 6px; padding: 7px 10px; width: 220px; outline: none; margin-left: 12px;
   }
   header input:focus { border-color: var(--accent); }
-  #run {
+  #run, #speed, #follow {
     background: #101c22; color: var(--accent); border: 1px solid var(--line);
-    border-radius: 6px; padding: 7px 16px; cursor: pointer; font-size: 13px;
+    border-radius: 6px; padding: 7px 14px; cursor: pointer; font-size: 13px;
     font-weight: 600; margin-left: 12px;
   }
-  #run:hover { border-color: var(--accent); }
+  #run:hover, #speed:hover, #follow:hover { border-color: var(--accent); }
   #run.running { background: var(--accent); color: #0d1418; }
+  #follow.active { background: var(--accent); color: #0d1418; }
+  #speed { min-width: 52px; }
   #stage {
     position: fixed; bottom: 52px; left: 50%; transform: translateX(-50%);
     z-index: 10; display: none; max-width: 60vw; white-space: nowrap;
@@ -79,7 +81,9 @@
   <div class="title">Pyntology <em>&mdash;</em> the onion</div>
   <input id="search" type="text" placeholder="search a node... (Enter)" autocomplete="off">
   <button id="run" type="button">Run</button>
-  <div class="sub">dedicated containment renderer &middot; Run replays the flow</div>
+  <button id="speed" type="button" title="playback speed: 1x, 0.5x, 0.25x">1x</button>
+  <button id="follow" type="button" title="top-down camera that follows the action">Follow</button>
+  <div class="sub">Run replays the flow &middot; Follow watches from above</div>
 </header>
 <div id="tooltip"></div>
 <div id="panel"></div>

@@ -90,6 +90,8 @@ const state = {
   flyTo: null,                // {x, y, z, dist} eased camera goal
   running: false, runCancel: false, runMarked: [],
   dots: [],                  // traveling flow dots: {mesh, from, to, t0, dur}
+  speed: 1,                  // playback rate for the run replay
+  topView: false,            // locked top-down camera that follows the action
 };
 
 function makeTextSprite(text, color) {
@@ -272,8 +274,10 @@ async function main() {
         .addScaledVector(upAxis, dy * k);
     } else {
       state.theta -= dx * 0.005;
-      state.phi = Math.min(Math.PI - 0.05,
-        Math.max(0.05, state.phi - dy * 0.005));
+      if (!state.topView) {
+        state.phi = Math.min(Math.PI - 0.05,
+          Math.max(0.05, state.phi - dy * 0.005));
+      }
     }
   });
   dom.addEventListener('wheel', (e) => {
@@ -292,9 +296,9 @@ async function main() {
     const step = e.shiftKey ? 0.02 : 0.07;
     if (e.key === 'ArrowLeft') state.theta -= step;
     else if (e.key === 'ArrowRight') state.theta += step;
-    else if (e.key === 'ArrowUp')
+    else if (e.key === 'ArrowUp' && !state.topView)
       state.phi = Math.max(0.05, state.phi - step);
-    else if (e.key === 'ArrowDown')
+    else if (e.key === 'ArrowDown' && !state.topView)
       state.phi = Math.min(Math.PI - 0.05, state.phi + step);
     else if (e.key === '+' || e.key === '=')
       state.dist = Math.max(25, state.dist * 0.9);
@@ -410,6 +414,8 @@ async function main() {
         state.dots.splice(i, 1);
       }
     }
+    // follow mode keeps the camera looking straight down
+    if (state.topView) state.phi = 0.15;
     camera.position.set(
       target.x + state.dist * Math.sin(state.phi) * Math.cos(state.theta),
       target.y + state.dist * Math.cos(state.phi),
@@ -519,6 +525,26 @@ async function main() {
     });
   }
 
+  // playback speed: 1x -> 0.5x -> 0.25x -> 1x, applies to the run replay
+  const speedBtn = document.getElementById('speed');
+  const SPEEDS = [1, 0.5, 0.25];
+  speedBtn.addEventListener('click', () => {
+    state.speed = SPEEDS[(SPEEDS.indexOf(state.speed) + 1) % SPEEDS.length];
+    speedBtn.textContent = `${state.speed}x`;
+  });
+
+  // follow mode: locked top-down camera; the eased target glides over the
+  // graph while the animation plays underneath - a bird watching the flow
+  const followBtn = document.getElementById('follow');
+  followBtn.addEventListener('click', () => {
+    state.topView = !state.topView;
+    followBtn.classList.toggle('active', state.topView);
+    if (state.topView) {
+      flyTo({ x: 0, y: 0, z: 0,
+              dist: Math.min(state.dist, state.maxShell * 2.4) });
+    }
+  });
+
   const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 
   function flyTo({ x, y, z, dist }) {
@@ -541,7 +567,7 @@ async function main() {
       stageEl.textContent = `${i + 1}/${program.stages.length} \u2014 ${st.label || name}`;
       stageEl.classList.add('visible');
       playStage(st);
-      await sleep(st.dur || 1.4);
+      await sleep((st.dur || 1.4) / state.speed);
     }
     // restore normal colors; the green output marks stay until Esc
     stageEl.classList.remove('visible');
@@ -556,9 +582,13 @@ async function main() {
   }
 
   function playStage(st) {
-    // camera glides to this stage's node
+    // camera glides to this stage's node; in follow mode it only pans
+    // across the top-down view and keeps the user's zoom
     const p = pos.get(st.id);
-    if (p) flyTo({ x: p.x, y: p.y, z: p.z, dist: Math.min(state.dist, 320) });
+    if (p) {
+      if (state.topView) flyTo({ x: p.x, y: p.y, z: p.z, dist: state.dist });
+      else flyTo({ x: p.x, y: p.y, z: p.z, dist: Math.min(state.dist, 320) });
+    }
     // light the stage's cast, dim the rest of the world
     const cast = new Set([st.id, ...(st.glow || [])]);
     for (const [nid, mesh] of state.nodeMeshes) {
@@ -583,8 +613,8 @@ async function main() {
       const from = new THREE.Vector3(a.x, a.y, a.z);
       const to = new THREE.Vector3(b.x, b.y, b.z);
       state.dots.push({
-        mesh, t0: now, dur: (st.dur || 1.4) * 1000, from, to,
-        arc: 0.1 * from.distanceTo(to),
+        mesh, t0: now, dur: (st.dur || 1.4) * 1000 / state.speed,
+        from, to, arc: 0.1 * from.distanceTo(to),
       });
     }
     // output produced: pulse it green, keep it marked until Esc
