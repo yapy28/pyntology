@@ -533,15 +533,14 @@ async function main() {
     speedBtn.textContent = `${state.speed}x`;
   });
 
-  // follow mode: locked top-down camera; the eased target glides over the
-  // graph while the animation plays underneath - a bird watching the flow
+  // follow mode: locked top-down camera framing the WHOLE graph - the
+  // animation plays inside the frame, the camera never chases a stage
   const followBtn = document.getElementById('follow');
   followBtn.addEventListener('click', () => {
     state.topView = !state.topView;
     followBtn.classList.toggle('active', state.topView);
     if (state.topView) {
-      flyTo({ x: 0, y: 0, z: 0,
-              dist: Math.min(state.dist, state.maxShell * 2.4) });
+      flyTo({ x: 0, y: 0, z: 0, dist: state.maxShell * 2.6 });
     }
   });
 
@@ -582,12 +581,12 @@ async function main() {
   }
 
   function playStage(st) {
-    // camera glides to this stage's node; in follow mode it only pans
-    // across the top-down view and keeps the user's zoom
-    const p = pos.get(st.id);
-    if (p) {
-      if (state.topView) flyTo({ x: p.x, y: p.y, z: p.z, dist: state.dist });
-      else flyTo({ x: p.x, y: p.y, z: p.z, dist: Math.min(state.dist, 320) });
+    // camera glides to this stage's node - except in follow mode, where
+    // the whole graph stays in one top-down frame and the animation
+    // plays inside it instead of the camera chasing it
+    if (!state.topView) {
+      const p = pos.get(st.id);
+      if (p) flyTo({ x: p.x, y: p.y, z: p.z, dist: Math.min(state.dist, 320) });
     }
     // light the stage's cast, dim the rest of the world
     const cast = new Set([st.id, ...(st.glow || [])]);
