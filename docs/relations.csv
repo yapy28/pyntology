@@ -1,0 +1,10 @@
+id,relation,definition,example,status
+contains,contains,"A has B as a part.","a program contains statements",draft
+creates,creates,"A brings B into existence.","a statement creates values",draft
+binds,binds,"A attaches a name to B.","assignment binds a name to a value",draft
+calls,calls,"A starts B's execution.","a statement calls a function",draft
+receives,receives,"A takes B in.","a parameter receives an argument's value",draft
+returns,returns,"A gives B back to its caller.","a function returns a value",draft
+writes,writes,"A puts B into a destination.","print writes text to stdout",draft
+converts,converts,"A turns B into another type.","casting converts a value",draft
+observes,observes,"A reads B without changing it.","print observes its arguments",draft

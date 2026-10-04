@@ -64,5 +64,14 @@ share.
 
 | File | Contents |
 |------|----------|
+| [docs/concepts.csv](docs/concepts.csv) + [docs/relations.csv](docs/relations.csv) | The concept database: one row per Python concept, controlled columns, load into Google Sheets |
+| [docs/concepts.md](docs/concepts.md) | The database rendered readable (generated; edit the CSVs, never this) |
 | [docs/shapes.md](docs/shapes.md) | The shape language: entry contract, every shape, why it is what it is |
 | [DESIGN.md](DESIGN.md) | Settled decisions, hard rules, open work, parking lot |
+
+The database has a cop and a renderer, both pure stdlib:
+
+```bash
+python3 src/check_concepts.py     # validate: controlled vocabulary enforced
+python3 src/render_concepts.py    # regenerate docs/concepts.md from the CSVs
+```
