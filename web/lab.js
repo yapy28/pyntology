@@ -90,14 +90,27 @@ function buildBall(fact) {
 }
 
 function buildIntakePipe(x) {
-  // the pipe from where a line's literals are born down into its box
-  const geo = new THREE.CylinderGeometry(2.0, 2.0, 8, 14, 1, true);
+  // the channel: matter drops from its birth point, through the
+  // observation lens, into the box below
+  const geo = new THREE.CylinderGeometry(2.0, 2.0, 12, 14, 1, true);
   const pipe = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
     color: FLOW, transparent: true, opacity: 0.12,
     side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
   }));
-  pipe.position.set(x, 20.5, 0);
+  pipe.position.set(x, 19, 0);
   return pipe;
+}
+
+function buildLens(x) {
+  // print's observation lens: a donut aperture on the intake channel.
+  // Matter passes THROUGH it; the beam sweeps, the readout projects to
+  // the wall; what exits is exactly what entered. Nothing comes back.
+  const lens = new THREE.Mesh(
+    new THREE.TorusGeometry(3.9, 0.7, 14, 40),
+    new THREE.MeshLambertMaterial({ color: '#9fb8c4', emissive: 0x1c2830 }));
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(x, 19, 0);
+  return lens;
 }
 
 function buildCone(from, to) {
@@ -170,7 +183,7 @@ function eventCaption(ev) {
     case 'line': return `line ${ev.line}: <code>${ev.code || ''}</code>`;
     case 'assign':
       return `${ev.name} = ${ev.value?.repr ?? ''}  (bound in ${ev.scope})`;
-    case 'output': return `print writes to stdout: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
+    case 'output': return `print observes — the wall shows the value as text: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
     case 'exception':
       return `alarm: ${ev.exc} — ${ev.text || ''}${ev.uncaught ? ' (uncaught, the program dies)' : ''}`;
     default: return ev.kind;
@@ -198,15 +211,20 @@ function applyFrame(f) {
       const pipe = buildIntakePipe(boxX(index));
       scene.add(pipe);
       state.pipes.push({ mesh: pipe, until: 0 });
+      const lens = buildLens(boxX(index));
+      scene.add(lens);
       group.userData.pick = { kind: 'box', line: ev.line, code: ev.code };
       group.traverse((o) => { o.userData.pick = o.userData.pick || group.userData.pick; });
       state.pickables.push(group);
-      state.boxes.set(id, { group, pipe, ev });
+      lens.userData.pick = { kind: 'lens' };
+      state.pickables.push(lens);
+      state.boxes.set(id, { group, pipe, lens, ev });
     }
   });
 
-  // matter: balls born at their line's pipe; once an output happened
-  // after their birth, they have flowed into the box and rest inside
+  // matter: balls born above their line's lens; once an output happened
+  // after their birth, they have dropped THROUGH the lens (observed,
+  // unchanged) and rest in the box below
   let slot = 0;
   const seen = new Set();
   for (const ev of events) {
@@ -220,9 +238,7 @@ function applyFrame(f) {
       const x = boxX(index);
       const entry = materialize(id, fact, ev.line, x);
       const observed = events.find((e) => e.kind === 'output');
-      entry.targetPos = new THREE.Vector3(
-        x + (observed ? 0 : 0), observed ? 12 : 24.5, observed ? 0 : 0);
-      entry.inside = !!observed;
+      entry.targetPos = new THREE.Vector3(x, observed ? 12.5 : 25.5, 0);
     }
   }
 
@@ -236,10 +252,10 @@ function applyFrame(f) {
 function materialize(id, fact, line, x) {
   if (state.matter.has(id)) return state.matter.get(id);
   const group = buildBall(fact);
-  group.position.set(x, 24.5, 0);
+  group.position.set(x, 25.5, 0);
   scene.add(group);
   const entry = { group, kind: 'matter', fact, line,
-    targetPos: new THREE.Vector3(x, 24.5, 0), inside: false };
+    targetPos: new THREE.Vector3(x, 25.5, 0) };
   group.traverse((o) => { o.userData.pick = entry; });
   state.matter.set(id, entry);
   state.pickables.push(group);
@@ -261,17 +277,22 @@ function setFrame(f, { pulses = false } = {}) {
   if (pulses && ev) {
     const now = performance.now();
     if (ev.kind === 'line') {
-      // the working box lights up while its matter drops in
+      // the working box lights up
       const box = state.boxes.get(ev.line);
       if (box) {
         box.group.userData.body.material.emissive.setHex(0x2d8f5f);
         box.group.userData.working = now + 1500;
-        box.pipe.until = now + 2200;
       }
     }
     if (ev.kind === 'output') {
+      // matter drops through the lens: the beam sweeps, the readout
+      // projects to the wall, the ball exits unchanged
       state.cone.visible = true;
       state.cone.userData.until = now + 1800;
+      for (const box of state.boxes.values()) {
+        box.pipe.until = now + 2200;
+        box.lens.userData.scanning = now + 1600;
+      }
     }
   }
 }
@@ -295,6 +316,7 @@ function hoverName(entry) {
   switch (entry.kind) {
     case 'matter': return entry.fact.repr || entry.fact.type;
     case 'screen': return 'stdout';
+    case 'lens': return 'print';
     case 'box': return `line ${entry.line}`;
     case 'floor': return state.tape.program;
     default: return '?';
@@ -305,6 +327,7 @@ function hoverKind(entry) {
   switch (entry.kind) {
     case 'matter': return entry.fact.type;
     case 'screen': return 'output of print';
+    case 'lens': return 'builtin function · observes, never transforms';
     case 'box': return 'statement';
     case 'floor': return 'module';
     default: return '';
@@ -337,10 +360,22 @@ function renderPanel(entry) {
     html = `
       <div class="kind">stdout</div>
       <h2>print's output</h2>
-      <div class="desc">stdout is Python's standard output stream:
-      everything print() writes lands here, in order, as a copy — the
-      printed values themselves are never changed.</div>
+      <div class="desc">stdout is Python's standard output stream; the
+      wall accumulates every line print writes. What you see here is
+      <code>str(value)</code> — the value's string representation, not
+      the value itself: the object is untouched.</div>
       <div class="fact">${esc(observed || '(nothing printed yet at this frame)')}</div>`;
+  } else if (entry.kind === 'lens') {
+    const observed = state.tape.events.slice(0, state.frame + 1)
+      .filter((e) => e.kind === 'output');
+    html = `
+      <div class="kind">builtin function</div>
+      <h2>print</h2>
+      <div class="desc">Matter passes through the lens; the beam sweeps
+      it and projects <code>str(value)</code> onto the wall. What exits
+      is exactly what entered — print never transforms, and it returns
+      None: nothing comes back to you.</div>
+      <div class="fact">in this run: observed ${observed.length} time${observed.length === 1 ? '' : 's'}</div>`;
   } else if (entry.kind === 'box') {
     html = `
       <div class="kind">statement</div>
@@ -411,11 +446,9 @@ async function main() {
   state.screen.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
   state.pickables.push(state.screen);
 
-  // the projection cone is built once the first box exists (box 0's
-  // front face is the print mouth); rebuilt per frame count is fine at
-  // lesson scale, so build lazily in applyFrame via cone creation
+  // the projection cone: from the observation lens to the display wall
   state.cone = buildCone(
-    new THREE.Vector3(boxX(0) + 13.5, 12, 0),
+    new THREE.Vector3(boxX(0), 19, 0),
     new THREE.Vector3(20, 26, -33));
   scene.add(state.cone);
 
@@ -542,17 +575,17 @@ async function main() {
         if (s >= 1) delete entry.born;
       }
       entry.group.position.lerp(entry.targetPos, 0.07);
-      entry.group.userData.ball.material.opacity = 1;
-      entry.group.userData.ball.material.transparent =
-        entry.group.userData.ball.material.transparent || false;
-      entry.group.userData.ball.material.emissive.setHex(
-        entry.inside ? 0x0d1418 : 0x14222a);
+      // observed matter is NEVER dimmed or recolored: what exits the
+      // lens is exactly what entered
     }
     for (const box of state.boxes.values()) {
       const body = box.group.userData.body;
       if (!box.group.userData.working || now > box.group.userData.working) {
         body.material.emissive.setHex(0x0a1014);
       }
+      box.lens.material.emissive.setHex(
+        box.lens.userData.scanning && now < box.lens.userData.scanning
+          ? 0x2d8f5f : 0x1c2830);
     }
     for (const p of state.pipes) {
       p.mesh.material.opacity = (now < p.until) ? 0.5 : 0.12;
