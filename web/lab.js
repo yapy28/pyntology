@@ -66,11 +66,12 @@ function buildHelix(fact) {
   const len = fact.len ?? text.length;
   const color = TYPE_COLORS.str;
   // scale rule: short strings show every character as a bead on the
-  // coil; long strings collapse the beads into a coiled cable
+  // coil; long strings collapse the beads into a coiled cable. The
+  // value itself lives in hover/click, never on a floating billboard.
   const showBeads = len <= 40;
-  const radius = 2.6;
+  const radius = 2.0;
   const turns = Math.max(2, len / 3.5);
-  const length = Math.max(14, len * 2.0);
+  const length = Math.max(12, len * 1.4);
   const pts = [];
   for (let i = 0; i <= 120; i++) {
     const t = i / 120;
@@ -80,21 +81,18 @@ function buildHelix(fact) {
   }
   const curve = new THREE.CatmullRomCurve3(pts);
   group.add(new THREE.Mesh(
-    new THREE.TubeGeometry(curve, 200, 0.55, 8, false),
+    new THREE.TubeGeometry(curve, 160, 0.45, 8, false),
     new THREE.MeshLambertMaterial({ color, emissive: 0x0c2229 })));
   if (showBeads) {
     for (let i = 0; i < len; i++) {
       const p = curve.getPointAt((i + 0.5) / len);
       const bead = new THREE.Mesh(
-        new THREE.SphereGeometry(1.05, 10, 8),
+        new THREE.SphereGeometry(0.85, 10, 8),
         new THREE.MeshLambertMaterial({ color: '#dff4ff', emissive: 0x223138 }));
       bead.position.copy(p);
       group.add(bead);
     }
   }
-  const tag = makeTextSprite(fact.repr || `'${text}'`, color, 40);
-  tag.position.set(0, radius + 6, 0);
-  group.add(tag);
   return group;
 }
 
@@ -102,13 +100,10 @@ function buildOrb(fact) {
   const group = new THREE.Group();
   const color = TYPE_COLORS[fact.type] || TYPE_COLORS.unknown;
   const mag = Math.abs(parseFloat(fact.repr)) || 1;
-  const r = 4 + Math.min(8, Math.log2(mag + 1) * 2);
+  const r = 3 + Math.min(6, Math.log2(mag + 1) * 1.5);
   group.add(new THREE.Mesh(
     new THREE.SphereGeometry(r, 24, 18),
     new THREE.MeshLambertMaterial({ color, emissive: 0x1a1a10 })));
-  const tag = makeTextSprite(fact.repr, color, 40);
-  tag.position.set(0, r + 5, 0);
-  group.add(tag);
   return group;
 }
 
@@ -243,6 +238,19 @@ function buildBeam() {
   return beam;
 }
 
+function buildWire() {
+  // the data path: from the statement that creates the value to the
+  // function that receives it. Faint at rest, glows while a value
+  // travels through print.
+  const a = new THREE.Vector3(STAGE.plate.x + 13, STAGE.plate.y - 1, STAGE.plate.z);
+  const b = new THREE.Vector3(STAGE.ring.x - 6.5, STAGE.ring.y, STAGE.ring.z);
+  const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+  const wire = new THREE.Line(geo, new THREE.LineBasicMaterial({
+    color: '#5cf1b4', transparent: true, opacity: 0.22,
+  }));
+  return wire;
+}
+
 // ---- the fold: scene state from events 0..f --------------------------
 
 function eventCaption(ev) {
@@ -339,6 +347,7 @@ function setFrame(f, { pulses = false } = {}) {
     if (ev.kind === 'output') {
       state.beam.visible = true;
       state.beam.userData.until = performance.now() + 1800;
+      state.wire.userData.until = performance.now() + 1800;
     }
   }
 }
@@ -491,6 +500,9 @@ async function main() {
   state.observer.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'observer' }; });
   state.pickables.push(state.observer);
 
+  state.wire = buildWire();
+  scene.add(state.wire);
+
   state.screen = buildScreen();
   scene.add(state.screen);
   state.screen.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
@@ -629,6 +641,8 @@ async function main() {
         && now > state.beam.userData.until) {
       state.beam.visible = false;
     }
+    state.wire.material.opacity =
+      (state.wire.userData.until && now < state.wire.userData.until) ? 0.9 : 0.22;
     camera.position.set(
       target.x + state.dist * Math.sin(state.phi) * Math.cos(state.theta),
       target.y + state.dist * Math.cos(state.phi),
