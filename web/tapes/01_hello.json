@@ -1,0 +1,60 @@
+{
+ "program": "01_hello",
+ "source": "# Lesson 1: hello.\n# The smallest complete experiment. One piece of matter comes into\n# existence - the string \"Hello, world!\" - and the microscope observes\n# it. Observation never transforms: when the program ends, the string\n# is exactly what it was.\n\nprint(\"Hello, world!\")\n",
+ "lines": [
+  "# Lesson 1: hello.",
+  "# The smallest complete experiment. One piece of matter comes into",
+  "# existence - the string \"Hello, world!\" - and the microscope observes",
+  "# it. Observation never transforms: when the program ends, the string",
+  "# is exactly what it was.",
+  "",
+  "print(\"Hello, world!\")"
+ ],
+ "events": [
+  {
+   "i": 0,
+   "kind": "start"
+  },
+  {
+   "i": 1,
+   "kind": "call_enter",
+   "func": "<module>",
+   "args": {}
+  },
+  {
+   "i": 2,
+   "kind": "line",
+   "line": 7,
+   "code": "print(\"Hello, world!\")",
+   "consts": [
+    {
+     "type": "str",
+     "text": "Hello, world!",
+     "len": 13,
+     "repr": "'Hello, world!'"
+    }
+   ]
+  },
+  {
+   "i": 3,
+   "kind": "output",
+   "text": "Hello, world!\n"
+  },
+  {
+   "i": 4,
+   "kind": "call_return",
+   "func": "<module>",
+   "value": {
+    "type": "NoneType",
+    "repr": "None"
+   }
+  },
+  {
+   "i": 5,
+   "kind": "end",
+   "code": 0
+  }
+ ],
+ "stdout": "Hello, world!\n",
+ "python": "3.14.7"
+}
