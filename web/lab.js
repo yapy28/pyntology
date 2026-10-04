@@ -23,10 +23,12 @@ const FLOW = '#5cf1b4';
 
 const state = {
   tape: null, frame: -1, playing: false,
-  boxes: new Map(),        // line -> {group, face, kind: 'box', line, code}
+  boxes: new Map(),        // line -> {group, pipe, lens, ev}
   matter: new Map(),       // id -> {group, kind: 'matter', fact, line, targetPos}
   pipes: [],               // {mesh, until}
-  cone: null, screen: null, floor: null,
+  cone: null, wall: null, wallLines: 0, floor: null,
+  scan: null,              // the beam sweep: {mesh, t0, x}
+  ghosts: [],               // after-images proving no mutation: {mesh, t0}
   pickables: [],
   camera: null, target: null, dist: 170, theta: 0.7, phi: 1.15,
   flyTo: null, drag: null,
@@ -128,44 +130,42 @@ function buildCone(from, to) {
   return cone;
 }
 
-function buildScreen() {
+function buildWall() {
+  // the display wall: output history is a physical place. Every print
+  // adds a line strip to it, top to bottom, that stays - walk along it
+  // and you walk the program's output.
   const group = new THREE.Group();
-  const frame = new THREE.Mesh(
-    new THREE.BoxGeometry(30, 18, 1.5),
-    new THREE.MeshLambertMaterial({ color: 0x182329 }));
-  group.add(frame);
-  const face = new THREE.Mesh(
-    new THREE.PlaneGeometry(27, 15.4),
-    new THREE.MeshBasicMaterial({ color: 0x0b1013 }));
-  face.position.z = 0.9;
-  group.add(face);
-  const textPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(25.5, 14),
-    new THREE.MeshBasicMaterial({ transparent: true }));
-  textPlane.position.z = 1.0;
-  group.add(textPlane);
-  group.userData.textPlane = textPlane;
-  group.userData.face = face;
-  group.position.set(20, 26, -34);
-  group.rotation.y = -0.3;
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(58, 40, 2),
+    new THREE.MeshLambertMaterial({ color: 0x141d24 }));
+  group.add(slab);
+  group.position.set(36, 24, -46);
+  group.rotation.y = -0.35;
   return group;
 }
 
-function screenTexture(text) {
+function lineTexture(text) {
   const canvas = document.createElement('canvas');
-  canvas.width = 640; canvas.height = 360;
+  canvas.width = 1024; canvas.height = 128;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#0b1013';
-  ctx.fillRect(0, 0, 640, 360);
-  ctx.font = '600 26px "SF Mono", Menlo, Consolas, monospace';
+  ctx.fillStyle = '#0d1418';
+  ctx.fillRect(0, 0, 1024, 128);
+  ctx.font = '600 44px "SF Mono", Menlo, Consolas, monospace';
   ctx.fillStyle = FLOW;
-  const lines = (text || '').replace(/\n$/, '').split('\n');
-  lines.slice(0, 9).forEach((line, idx) => {
-    ctx.fillText(line.length > 46 ? line.slice(0, 45) + '…' : line, 24, 44 + idx * 34);
-  });
+  const line = (text || '').replace(/\n$/, '');
+  ctx.fillText(line.length > 40 ? line.slice(0, 39) + '…' : line, 20, 84);
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
   return tex;
+}
+
+function addWallLine(wall, text, index) {
+  const strip = new THREE.Mesh(
+    new THREE.PlaneGeometry(52, 6.2),
+    new THREE.MeshBasicMaterial({ map: lineTexture(text), transparent: true }));
+  strip.position.set(0, 15 - index * 7, 1.2);
+  wall.add(strip);
+  return strip;
 }
 
 // ---- the fold: scene state from events 0..f --------------------------
@@ -242,11 +242,12 @@ function applyFrame(f) {
     }
   }
 
-  // observation: everything printed so far, on the screen
-  const observedText = events.filter((e) => e.kind === 'output')
-    .map((e) => e.text).join('');
-  state.screen.userData.textPlane.material.map = screenTexture(observedText);
-  state.screen.userData.face.material.color.setHex(observedText ? 0x0b2018 : 0x0b1013);
+  // observation: every output event adds a physical line to the wall
+  events.filter((e) => e.kind === 'output').forEach((ev, index) => {
+    if (index < state.wallLines) return;
+    addWallLine(state.wall, ev.text, index);
+    state.wallLines = index + 1;
+  });
 }
 
 function materialize(id, fact, line, x) {
@@ -285,13 +286,40 @@ function setFrame(f, { pulses = false } = {}) {
       }
     }
     if (ev.kind === 'output') {
-      // matter drops through the lens: the beam sweeps, the readout
-      // projects to the wall, the ball exits unchanged
+      // matter drops through the lens: the beam sweeps over it, the
+      // readout projects to the wall, and an after-image stays at the
+      // aperture to prove what went in equals what came out
       state.cone.visible = true;
       state.cone.userData.until = now + 1800;
-      for (const box of state.boxes.values()) {
-        box.pipe.until = now + 2200;
-        box.lens.userData.scanning = now + 1600;
+      const lineEv = [...state.tape.events.slice(0, ev.i)]
+        .reverse().find((e) => e.kind === 'line');
+      const box = lineEv ? state.boxes.get(lineEv.line) : null;
+      const x = box ? boxX([...state.boxes.keys()].indexOf(lineEv.line)) : boxX(0);
+      for (const b of state.boxes.values()) {
+        b.pipe.until = now + 2200;
+        b.lens.userData.scanning = now + 1600;
+      }
+      // the sweep: a scanner ring travels down the channel, crossing
+      // the falling matter once
+      state.scan.t0 = now;
+      state.scan.x = x;
+      // the identity ghost: a translucent copy of the observed matter
+      // pinned at the aperture plane, fading - same color, same size,
+      // no mutation
+      for (const entry of state.matter.values()) {
+        if (entry.observed) continue;
+        entry.observed = true;
+        const ghost = new THREE.Mesh(
+          entry.group.children[0].geometry,
+          new THREE.MeshBasicMaterial({
+            color: TYPE_COLORS[entry.fact.type] || TYPE_COLORS.unknown,
+            transparent: true, opacity: 0.4, depthWrite: false,
+          }));
+        ghost.position.set(x, 19, 0);
+        ghost.raycast = () => {};
+        scene.add(ghost);
+        state.ghosts.push({ mesh: ghost, t0: now });
+        break;
       }
     }
   }
@@ -356,15 +384,16 @@ function renderPanel(entry) {
       <div class="fact">value: ${esc(fact.text ?? fact.repr ?? '')}</div>`;
   } else if (entry.kind === 'screen') {
     const observed = state.tape.events.slice(0, state.frame + 1)
-      .filter((e) => e.kind === 'output').map((e) => e.text).join('');
+      .filter((e) => e.kind === 'output');
     html = `
       <div class="kind">stdout</div>
-      <h2>print's output</h2>
+      <h2>the display wall</h2>
       <div class="desc">stdout is Python's standard output stream; the
-      wall accumulates every line print writes. What you see here is
-      <code>str(value)</code> — the value's string representation, not
-      the value itself: the object is untouched.</div>
-      <div class="fact">${esc(observed || '(nothing printed yet at this frame)')}</div>`;
+      wall accumulates one line per print, in order - the program's
+      output history as a place you can walk along. What you see on it
+      is <code>str(value)</code>, the value's string representation,
+      not the value itself.</div>
+      <div class="fact">lines on the wall at this frame: ${observed.length}</div>`;
   } else if (entry.kind === 'lens') {
     const observed = state.tape.events.slice(0, state.frame + 1)
       .filter((e) => e.kind === 'output');
@@ -440,17 +469,32 @@ async function main() {
   floor.userData.pick = { kind: 'floor' };
   state.pickables.push(floor);
 
-  // stdout, standing where the whole room can see it
-  state.screen = buildScreen();
-  scene.add(state.screen);
-  state.screen.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
-  state.pickables.push(state.screen);
+  // the display wall: output history is a physical place to walk along
+  state.wall = buildWall();
+  scene.add(state.wall);
+  state.wall.userData.pick = { kind: 'screen' };
+  state.wall.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
+  state.pickables.push(state.wall);
 
-  // the projection cone: from the observation lens to the display wall
+  // the projection cone: from the observation lens to the wall's
+  // current line
   state.cone = buildCone(
     new THREE.Vector3(boxX(0), 19, 0),
-    new THREE.Vector3(20, 26, -33));
+    new THREE.Vector3(30, 30, -44));
   scene.add(state.cone);
+
+  // the beam sweep: a scanner ring that travels down the channel,
+  // crossing the matter once per observation
+  state.scan = { t0: -1e9, x: boxX(0), mesh: null };
+  state.scan.mesh = new THREE.Mesh(
+    new THREE.TorusGeometry(5.6, 0.28, 10, 48),
+    new THREE.MeshBasicMaterial({
+      color: FLOW, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+  state.scan.mesh.rotation.x = Math.PI / 2;
+  state.scan.mesh.visible = false;
+  scene.add(state.scan.mesh);
 
   // navigation: orbit, pan, zoom
   const target = new THREE.Vector3(-20, 10, 0);
@@ -589,6 +633,29 @@ async function main() {
     }
     for (const p of state.pipes) {
       p.mesh.material.opacity = (now < p.until) ? 0.5 : 0.12;
+    }
+    // the beam sweep: the scanner ring travels down the channel over
+    // ~0.9s, bright at the crossings, gone when it exits
+    const scanAge = now - state.scan.t0;
+    if (scanAge >= 0 && scanAge < 900) {
+      const p = scanAge / 900;
+      state.scan.mesh.visible = true;
+      state.scan.mesh.position.set(state.scan.x, 25.5 - 13 * p, 0);
+      state.scan.mesh.material.opacity = 0.9 * Math.sin(p * Math.PI);
+    } else {
+      state.scan.mesh.visible = false;
+    }
+    // identity ghosts fade away: what went in = what came out
+    for (let i = state.ghosts.length - 1; i >= 0; i--) {
+      const g = state.ghosts[i];
+      const age = now - g.t0;
+      if (age > 2200) {
+        scene.remove(g.mesh);
+        g.mesh.material.dispose();
+        state.ghosts.splice(i, 1);
+      } else {
+        g.mesh.material.opacity = 0.4 * (1 - age / 2200);
+      }
     }
     if (state.cone.visible && state.cone.userData.until
         && now > state.cone.userData.until) {
