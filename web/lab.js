@@ -281,6 +281,13 @@ function materialize(id, fact, line, x) {
 function setFrame(f, { pulses = false } = {}) {
   state.frame = f;
   applyFrame(f);
+  if (!pulses) {
+    // rewinding is not motion: scrubbing or restarting snaps matter to
+    // its fold position instead of easing it backwards through pipes
+    for (const entry of state.matter.values()) {
+      entry.group.position.copy(entry.targetPos);
+    }
+  }
   document.getElementById('scrub').value = f;
   document.getElementById('counter').textContent = `${f + 1} / ${state.tape.events.length}`;
   const cap = document.getElementById('caption');
