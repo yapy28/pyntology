@@ -361,9 +361,9 @@ async function playLoop() {
 function hoverName(entry) {
   switch (entry.kind) {
     case 'matter': return entry.fact.repr || entry.fact.type;
-    case 'screen': return 'observation screen';
+    case 'screen': return 'stdout';
     case 'observer': return 'print';
-    case 'plate': return 'statement plate';
+    case 'plate': return 'the running code';
     case 'bench': return state.tape.program;
     default: return '?';
   }
@@ -371,11 +371,11 @@ function hoverName(entry) {
 
 function hoverKind(entry) {
   switch (entry.kind) {
-    case 'matter': return `${entry.fact.type} matter`;
-    case 'screen': return 'projection of print';
-    case 'observer': return 'function · observes, never transforms';
-    case 'plate': return 'the code being run';
-    case 'bench': return 'experiment bench';
+    case 'matter': return entry.fact.type;
+    case 'screen': return 'output of print';
+    case 'observer': return 'builtin function';
+    case 'plate': return 'statement';
+    case 'bench': return 'module';
     default: return '';
   }
 }
@@ -388,51 +388,43 @@ function renderPanel(entry) {
   if (entry.kind === 'matter') {
     const fact = entry.fact;
     html = `
-      <div class="kind">${fact.type} matter</div>
+      <div class="kind">${fact.type}</div>
       <h2>${esc(fact.repr || '')}</h2>
-      <div class="desc">A value that exists while this line runs. Its
-      shape is its type; its size is its magnitude. Observation does not
-      transform it.</div>
-      <div class="fact">type: ${fact.type}${fact.len !== undefined ? `\nlength: ${fact.len} characters` : ''}</div>
+      <div class="fact">type: ${fact.type}${fact.len !== undefined ? `\nlength: ${fact.len}` : ''}${fact.type === 'str' ? ' characters' : ''}</div>
       <div class="fact">value: ${esc(fact.text ?? fact.repr ?? '')}</div>`;
   } else if (entry.kind === 'screen') {
     const observed = state.tape.events.slice(0, state.frame + 1)
       .filter((e) => e.kind === 'output').map((e) => e.text).join('');
     html = `
-      <div class="kind">observation screen</div>
-      <h2>the print projection</h2>
-      <div class="desc">print projects matter onto this screen. The
-      projection is a readout, not the matter: the string on the bench is
-      untouched.</div>
-      <div class="fact">${esc(observed || '(nothing observed yet at this frame)')}</div>`;
+      <div class="kind">stdout</div>
+      <h2>print's output</h2>
+      <div class="desc">Everything printed up to this frame. print writes
+      a copy to stdout; the value it printed is untouched.</div>
+      <div class="fact">${esc(observed || '(nothing printed yet at this frame)')}</div>`;
   } else if (entry.kind === 'observer') {
     html = `
-      <div class="kind">function</div>
+      <div class="kind">builtin function</div>
       <h2>print</h2>
-      <div class="desc">The function print: what passes through its ring
-      is observed and projected onto the screen. Observed, never
-      transformed - the string is exactly what it was.</div>`;
+      <div class="fact">print(*objects, sep=' ', end='\\n', file=None, flush=False)</div>
+      <div class="desc">Writes its arguments to stdout. Returns None.</div>`;
   } else if (entry.kind === 'plate') {
     const lines = state.tape.events.slice(0, state.frame + 1)
       .filter((e) => e.kind === 'line');
     const last = lines[lines.length - 1];
     html = `
-      <div class="kind">statement plate</div>
-      <h2>what is executing</h2>
-      <div class="desc">The code is the recipe. Matter materializes at
-      this plate when its line runs: the line is where values are
-      born.</div>
+      <div class="kind">statement</div>
+      <h2>the running code</h2>
+      <div class="desc">Values are born at the line that creates them.</div>
       <div class="fact">${last ? `line ${last.line}: ${esc(last.code)}` : '(no line has run yet at this frame)'}</div>`;
   } else if (entry.kind === 'bench') {
     const endEv = state.tape.events.find((e) => e.kind === 'end');
     html = `
-      <div class="kind">experiment bench</div>
+      <div class="kind">module</div>
       <h2>${esc(state.tape.program)}</h2>
-      <div class="desc">One program, one experiment. The ring is the power
-      line: it lights when the module loads and dims when the run ends.</div>
       <div class="fact">status: ${endEv && state.frame >= endEv.i
         ? `finished, exit code ${endEv.code}` : state.frame >= 0 ? 'running' : 'not started'}
-recorded on: CPython ${esc(state.tape.python)}</div>`;
+interpreter: CPython ${esc(state.tape.python)}
+lines: ${state.tape.lines.length}</div>`;
   }
   panel.innerHTML = html;
   panel.classList.add('visible');
