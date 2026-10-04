@@ -1,67 +1,93 @@
-# Design — settled decisions
+# Pyntology — settled decisions and open work
 
-This is the shared understanding reached before any code was written. Everything here is decided unless explicitly marked *parked* or *homework*.
+The lab era. This file records what is decided and what is parked, so
+decisions survive context and sessions.
 
-## The asset
+## The architecture (settled)
 
-One RDF knowledge graph, `colibri:`, unifying the Collibra operating model (and later the organization's real operating model and the metaphactory ontology registry) in a single interactive 3D page. The RDF graph is the artifact; the 3D page is its face.
+**Record, don't predict.** The interpreter is CPython: the tracer
+(`src/record.py`) runs the program for real under `sys.settrace` and
+captures what actually happened. Nothing is simulated. Any Python file
+can be rendered because CPython did the understanding.
 
-## Phase 1 — PoC (build now)
+The pipeline:
 
-- **Data**: Collibra out-of-the-box operating model, transcribed from the public docs at productresources.collibra.com. No Collibra trial instance, no API access needed. Estimated ~300 nodes / ~400 edges (estimate, to be confirmed during transcription).
-- **Vocabulary**: `colibri:` namespace, RDFS-light, ~25 terms, Turtle serialization, one named graph:
-  - Classes: AssetType, AttributeType, RelationType
-  - `rdfs:subClassOf` for the type hierarchy — drives the z-axis
-  - `skos:prefLabel` for names
-  - `colibri:provenance` — `"collibra-ootb"` | `"metaphactory"` | `"mock"`
-  - `colibri:mapsTo` — reserved for the ontology-to-Collibra join, populated in Phase 2
-  - No OWL restrictions, no SHACL in v1.
-- **Pipeline**: Python 3 + rdflib build script transforms the RDF graph into a static nodes/links JSON.
-- **Generic ontology loader** (Tier 1): RDF files dropped into `data/ontologies/` (`.ttl`, `.owl`, `.rdf`, `.nt`, `.n3`, `.jsonld`) are loaded and merged at build time. Standard OWL/SKOS mapping: `owl:Ontology`/`owl:Class`/properties/`skos:ConceptScheme`/`skos:Concept` become nodes with kinds ontology/class/property/vocabulary/concept; `rdfs:subClassOf`, `rdfs:subPropertyOf`, `skos:broader`, `owl:imports` become hierarchy links; `skos:inScheme` links concepts to vocabularies. Provenance is the file stem; `owl:imports` targets that were not loaded appear as phantom ontology nodes (`external-import`). Strata mode layers along all four hierarchy link types, so ontology import stacks render in depth. Blank nodes are skipped; the browser tops out around 20,000 nodes, so bring schema-level ontologies, not instance data. This is also the Phase 2 ingestion path for metaphactory Turtle exports.
-- **Frontend**: single static HTML page, 3d-force-graph (WebGL). No server, no framework, no auth.
-- **Interactions** (all client-side JS, no query engine at runtime):
-  - Layout modes: free-force 3D and Strata (DAG `zout` — depth = inheritance strata, subclass links only)
-  - Colors by node kind (asset / attribute / relation; the synthetic root is magenta). Provenance is uniform (`collibra-ootb`) in Phase 1, so it is shown in the click panel instead of the color; colors switch to provenance when Phase 2 mixes sources.
-  - Hover/select: 1-hop highlight in all directions, dim the rest
-  - Click panel: label, description, provenance badge, path to `Asset` root, direct subtypes, assigned asset types (attributes), head/tail and co-role (relations), possible values (selection attributes)
-  - Search box with fly-to on Enter
-  - Path-to-root highlight and fly-to buttons
-- **Definition of running (v1 bar)**: one HTML page, loads one JSON, renders the metamodel with provenance colors, layered z-axis, click panel, search, and at least one visible edge connecting an ontology entity to its Collibra counterpart (via `colibri:mapsTo`, even if hand-set for the demo).
+```
+lessons/*.py ──record.py──▶ web/tapes/*.json ──lab.js──▶ the scene
+   (program)                  (the tape: events,        (fold of events,
+                               capped facts)             idempotent)
+```
 
-## The z-axis semantics
+- The tape carries the event taxonomy: start/end, line events (with
+  literals as static matter), assignments (locals diffing), call
+  enter/return, output capture, exceptions. Values are capped facts
+  `{type, repr, len}`.
+- The renderer never parses Python. The scene at frame f is the fold of
+  events 0..f — idempotent, so the playhead scrubs anywhere and the
+  inspector answers "what does this hold at this exact moment".
+- `record.py` decides what is true; `lab.js` decides what it looks like.
+  The only contract between them is the tape schema.
 
-Depth is not decoration. Phase 1: inheritance distance from `Asset`. Later: ontology import strata — base ontologies at the bottom, importers stacked upward, so the ontology stack can be flown through as geological layers. This is the pitch's money shot.
+## Hard rules
 
-## No Neo4j
+- **No network, ever.** Local processes only, at record time and view
+  time. Real-data tapes stay local-only and gitignored; lesson tapes
+  are toy data end to end and are committable.
+- **Toy inputs only** for anything recorded.
 
-RDF stays canonical. Neo4j buys nothing for a static dump-render pipeline: the interactive features (1-hop highlight, expand-to-root, subclass chains) are client-side pointer-walking over a small JSON. The only moment a store becomes interesting is live querying (Phase 3), and the natural home is an RDF store (GraphDB or metaphactory itself), where the graph already lives. Porting to a property graph would discard the ontological identity of the exercise.
+## The shape language (settled contract, vocabulary still iterating)
 
-## Phase 2 — before the pitch (parked, prepped on the user's side)
+- **Matter from physics, motion from machinery.** If a shape carries no
+  semantic truth of Python, it is decoration and is rejected.
+- **The moving thing is the data.** Boxes are lines of code (readable
+  code on the face, in reading order); pipes carry balls (values in
+  transit, transit glows); the working box is the playhead. No empty
+  vehicles, no trams that carry nothing.
+- **No figurative sculpture.** Apparatus is geometric glyphs plus
+  labels; the metaphor lives in motion. (Killed: the DNA helix, the
+  microscope statue, the bench-with-ring.)
+- **Identity by hover and click, never floating billboards.**
+- **The scene speaks metaphor; the inspector speaks Python.** Panels
+  give run facts first (what actually happened in this recording), one
+  plain teaching sentence, and documentation only on demand.
+- **Every shape defines scale first** — behavior at 10 items and at
+  10,000 items — before anything else. See docs/shapes.md (note: its
+  entries predate the boxes/pipes/balls contract and await a rewrite).
 
-- Prepare the metaphactory structure (ontology registry via cheap, subject-indexed SPARQL probes) and the `colibri:mapsTo` mapping from there to the Collibra environment.
-- Transcribe the organization's real operating model: check whether Settings → Operating Model → Asset types is visible with reader access; request Collibra API read access framed as a read-only metadata audit.
-- Swap the real operating model into the same pipeline.
+## Sequencing (settled)
 
-## Pitch gate
+Iterate on the animation vocabulary for lesson 1 until it is right,
+*then* scale to the lesson corpus (hello, pay, overtime, computepay,
+min/max, string surgery, files, lists, dicts, tuples, then compounds —
+the PY4E-ordered spiral), then user programs.
 
-Pitch only when Phase 2 lands — the default model alone is a visualization of Collibra's world; the real operating model is the team lead's world. Two extra weeks for that difference is the highest-leverage time in the project.
+## Open work, in order
 
-## Established facts (verified via web research)
+1. **Visual quality pass on lesson 1** — the current render is raw
+   primitives with flat Lambert shading; it needs physically-based
+   materials, soft shadows, ACES tone mapping, bloom, and motion with
+   weight. Same tape, same fold; only vocabulary fidelity changes.
+2. **Lessons 2-10**, one shape-forcing program per build, after the
+   vocabulary settles.
+3. **docs/shapes.md rewrite** to the boxes/pipes/balls contract.
 
-- Collibra has a REST API (`/rest/2.0`) and a GraphQL API; authentication via basic auth, OAuth2 client credentials, or JWT. Permissions are RBAC-based — a reader with API access can GET everything visible in the UI.
-- Free trials are short and gated: 14-day Data Intelligence Cloud trial via partners, 20-day Data Quality & Observability trial on AWS Marketplace. Consequence: write extraction code against docs and mocks *before* burning a trial.
-- The out-of-the-box operating model (asset types, attribute types, relation types) is fully documented publicly — the metamodel is available without any instance.
-- metaphactory has a SPARQL editor, the Graph Store HTTP Protocol (whole-graph HTTP downloads — the cheap extraction path when store-side heavy queries are slow), a built-in `semantic-graph` component, and an SDK for custom components.
+## Parked (do not build until triggered)
 
-## Homework — facts to collect (user's environment, not discoverable from here)
-
-1. Is Settings → Operating Model visible with the current reader account in the organization's Collibra?
-2. Which store backs metaphactory (GraphDB, Virtuoso, Stardog, Neptune)? Determines the cheap extraction paths and the Phase 3 live store.
-3. Does the generation pipeline stamp Collibra assets with the source ontology IRI (attribute, externalId, or naming convention)? If not, propose adding it as part of the pitch — reframe the gap as traceability.
-4. Cheap probe for the next metaphactory session (subject-indexed, no aggregation):
-   `SELECT ?ont WHERE { GRAPH ?g { ?ont a owl:Ontology } } LIMIT 50`
-   Already confirmed to return results quickly.
-
-## Parked for a later session
-
-- metaphactory exploratory analysis: store identification, named-graph registry, cross-graph reference mapping, timeout diagnosis. Known signal: a `LIMIT 100` graph-enumeration query nearly timed out, while subject-indexed queries are fast — so the earlier timeouts were aggregation costs or configuration (metaphactory label service auto-enrichment is a known suspect), not scale or a broken store. Diagnosis before queries.
+- **A declarative mapping language.** The tape→scene rules currently
+  live as code in `lab.js` (applyFrame + the build* functions); ideally
+  they would be a human-readable mapping document (the R2RML/RML move:
+  event kind → shape, with conditions and scale rules) that a compiler
+  turns into renderer structures — reviewable, diffable, authorable
+  without touching the engine. Trigger to build: the vocabulary is
+  stable AND a lesson's behavior needs changing without renderer edits,
+  or the user wants to author mappings directly. Building it earlier
+  means churning the language while the shapes still churn.
+- **Engine swap option.** If three.js quality caps out, Babylon.js or
+  Godot-web consuming the same tapes is the fallback; the tape schema
+  survives any swap, which is the point of the architecture.
+- **The museum floor.** Python itself as a visual (the periodic table
+  of types, the instrument catalog, the laws) above the lab rooms, with
+  the two floors welded by physical identity (the ring IS the ontology's
+  print). Blocked on: the lab vocabulary settling first.
+- **Runtime value provenance for the inspector** (cracking open
+  containers, full contents at any frame) — needed by lesson 3+.
