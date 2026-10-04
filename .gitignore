@@ -14,3 +14,6 @@ tmp/
 
 # misc
 .DS_Store
+
+# the fetched documentation library (local reading material, never committed)
+sources/raw/

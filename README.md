@@ -67,6 +67,7 @@ share.
 | [docs/concepts.csv](docs/concepts.csv) + [docs/relations.csv](docs/relations.csv) | The concept database: one row per Python concept, controlled columns, load into Google Sheets |
 | [docs/concepts.md](docs/concepts.md) | The database rendered readable (generated; edit the CSVs, never this) |
 | [docs/shapes.md](docs/shapes.md) | The shape language: entry contract, every shape, why it is what it is |
+| [sources/](sources/SOURCES.md) | The documentation library: the complete official Python docs + the w3schools tutorial, fetched locally, read before every definition |
 | [DESIGN.md](DESIGN.md) | Settled decisions, hard rules, open work, parking lot |
 
 The database has a cop and a renderer, both pure stdlib:
