@@ -1,7 +1,11 @@
 # Pyntology — settled decisions and open work
 
-The lab era. This file records what is decided and what is parked, so
-decisions survive context and sessions.
+One project: the lab, a 3D interpreter for small Python programs. This
+file records what is decided and what is parked, so decisions survive
+context and sessions. (The onion/RDF viewer and everything that existed
+only for it were removed by decision — the museum floor, if it is ever
+built, will be built natively in the lab world, not resurrected from
+RDF.)
 
 ## The architecture (settled)
 
@@ -87,7 +91,9 @@ the PY4E-ordered spiral), then user programs.
   survives any swap, which is the point of the architecture.
 - **The museum floor.** Python itself as a visual (the periodic table
   of types, the instrument catalog, the laws) above the lab rooms, with
-  the two floors welded by physical identity (the ring IS the ontology's
-  print). Blocked on: the lab vocabulary settling first.
+  the two floors welded by physical identity. If built, it will be
+  built natively in the lab world (a static level of the same renderer),
+  not resurrected from the removed RDF pipeline. Blocked on: the lab
+  vocabulary settling first.
 - **Runtime value provenance for the inspector** (cracking open
   containers, full contents at any frame) — needed by lesson 3+.

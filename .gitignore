@@ -1,17 +1,7 @@
-# local ontology drop zone: employer ontologies stay local-only
-data/ontologies/*
-!data/ontologies/README.md
-!data/ontologies/python-conditions.ttl
-!data/ontologies/python-shacl.ttl
-
-# test subject python files (extracted into the drop zone instead)
+# test subject python files (not part of the curriculum)
 /categorize_violations.py
 
 # generated artifacts
-data/flow/
-web/graph.json
-web/file-graph.json
-reports/
 dist/
 
 # python
