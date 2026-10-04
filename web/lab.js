@@ -295,7 +295,7 @@ function applyFrame(f) {
       slot++;
       if (seen.has(id)) continue;
       seen.add(id);
-      const entry = materialize(id, fact, slot - 1);
+      const entry = materialize(id, fact, slot - 1, ev.line);
       const observed = firstOutputAfter(events.indexOf(ev));
       const base = observed ? STAGE.parked : STAGE.born;
       entry.targetPos = new THREE.Vector3(
@@ -310,12 +310,12 @@ function applyFrame(f) {
   state.screen.userData.face.material.color.setHex(observed ? 0x0b2018 : 0x0b1013);
 }
 
-function materialize(id, fact, slotIndex) {
+function materialize(id, fact, slotIndex, line) {
   if (state.shapes.has(id)) return state.shapes.get(id);
   const group = fact.type === 'str' ? buildHelix(fact) : buildOrb(fact);
   group.position.set(STAGE.born.x, STAGE.born.y, STAGE.born.z);
   scene.add(group);
-  const entry = { group, kind: 'matter', fact,
+  const entry = { group, kind: 'matter', fact, line,
     targetPos: new THREE.Vector3(STAGE.born.x, STAGE.born.y, STAGE.born.z) };
   group.traverse((o) => { o.userData.pick = entry; });
   state.shapes.set(id, entry);
@@ -387,9 +387,17 @@ function renderPanel(entry) {
   let html = '';
   if (entry.kind === 'matter') {
     const fact = entry.fact;
+    const whatItDoes = {
+      str: 'A str is text: a sequence of characters, in order.',
+      int: 'An int is a whole number.',
+      float: 'A float is a number with a decimal point.',
+      bool: 'A bool is True or False.',
+    }[fact.type] || '';
     html = `
       <div class="kind">${fact.type}</div>
       <h2>${esc(fact.repr || '')}</h2>
+      <div class="desc">${whatItDoes} This one was born at line
+      ${entry.line ?? '?'} when that line ran.</div>
       <div class="fact">type: ${fact.type}${fact.len !== undefined ? `\nlength: ${fact.len}` : ''}${fact.type === 'str' ? ' characters' : ''}</div>
       <div class="fact">value: ${esc(fact.text ?? fact.repr ?? '')}</div>`;
   } else if (entry.kind === 'screen') {
@@ -398,15 +406,17 @@ function renderPanel(entry) {
     html = `
       <div class="kind">stdout</div>
       <h2>print's output</h2>
-      <div class="desc">Everything printed up to this frame. print writes
-      a copy to stdout; the value it printed is untouched.</div>
+      <div class="desc">stdout is Python's standard output stream:
+      everything print() writes lands here, in order, as a copy — the
+      printed values themselves are never changed.</div>
       <div class="fact">${esc(observed || '(nothing printed yet at this frame)')}</div>`;
   } else if (entry.kind === 'observer') {
     html = `
       <div class="kind">builtin function</div>
       <h2>print</h2>
-      <div class="fact">print(*objects, sep=' ', end='\\n', file=None, flush=False)</div>
-      <div class="desc">Writes its arguments to stdout. Returns None.</div>`;
+      <div class="desc">print(...) writes its arguments to stdout as
+      text, then returns None.</div>
+      <div class="fact">print(*objects, sep=' ', end='\\n', file=None, flush=False)</div>`;
   } else if (entry.kind === 'plate') {
     const lines = state.tape.events.slice(0, state.frame + 1)
       .filter((e) => e.kind === 'line');
@@ -414,13 +424,17 @@ function renderPanel(entry) {
     html = `
       <div class="kind">statement</div>
       <h2>the running code</h2>
-      <div class="desc">Values are born at the line that creates them.</div>
+      <div class="desc">Python runs a file top to bottom, one line at a
+      time; this is the line it reached at this frame. Values are born at
+      the line that creates them.</div>
       <div class="fact">${last ? `line ${last.line}: ${esc(last.code)}` : '(no line has run yet at this frame)'}</div>`;
   } else if (entry.kind === 'bench') {
     const endEv = state.tape.events.find((e) => e.kind === 'end');
     html = `
       <div class="kind">module</div>
       <h2>${esc(state.tape.program)}</h2>
+      <div class="desc">A module is a Python file: running it executes
+      the whole file, top to bottom.</div>
       <div class="fact">status: ${endEv && state.frame >= endEv.i
         ? `finished, exit code ${endEv.code}` : state.frame >= 0 ? 'running' : 'not started'}
 interpreter: CPython ${esc(state.tape.python)}
