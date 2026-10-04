@@ -168,7 +168,8 @@ function codePlateTexture(lineNo, code) {
 
 function buildObserver() {
   // the observation ring: print as a geometric glyph, never a sculpture.
-  // What passes through it is projected, not transformed.
+  // What passes through it is projected, not transformed. Its identity
+  // comes from hover and click, not from a floating label.
   const group = new THREE.Group();
   const post = new THREE.Mesh(
     new THREE.CylinderGeometry(0.9, 1.3, 11, 10),
@@ -180,9 +181,6 @@ function buildObserver() {
     new THREE.MeshLambertMaterial({ color: '#9fb8c4', emissive: 0x1c2830 }));
   ring.rotation.y = Math.PI / 2;
   group.add(ring);
-  const label = makeTextSprite('print', '#5cf1b4', 36);
-  label.position.set(0, 9, 0);
-  group.add(label);
   group.position.set(STAGE.ring.x, STAGE.ring.y, STAGE.ring.z);
   return group;
 }
@@ -260,7 +258,7 @@ function eventCaption(ev) {
     case 'line': return `line ${ev.line}: <code>${ev.code || ''}</code>`;
     case 'assign':
       return `${ev.name} = ${ev.value?.repr ?? ''}  (bound in ${ev.scope})`;
-    case 'output': return `the observer projects: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
+    case 'output': return `print observes: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
     case 'exception':
       return `alarm: ${ev.exc} — ${ev.text || ''}${ev.uncaught ? ' (uncaught, the experiment dies)' : ''}`;
     default: return ev.kind;
@@ -360,6 +358,28 @@ async function playLoop() {
 
 // ---- inspector ---------------------------------------------------------
 
+function hoverName(entry) {
+  switch (entry.kind) {
+    case 'matter': return entry.fact.repr || entry.fact.type;
+    case 'screen': return 'observation screen';
+    case 'observer': return 'print';
+    case 'plate': return 'statement plate';
+    case 'bench': return state.tape.program;
+    default: return '?';
+  }
+}
+
+function hoverKind(entry) {
+  switch (entry.kind) {
+    case 'matter': return `${entry.fact.type} matter`;
+    case 'screen': return 'projection of print';
+    case 'observer': return 'function · observes, never transforms';
+    case 'plate': return 'the code being run';
+    case 'bench': return 'experiment bench';
+    default: return '';
+  }
+}
+
 function renderPanel(entry) {
   const panel = document.getElementById('panel');
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g,
@@ -387,10 +407,22 @@ function renderPanel(entry) {
       <div class="fact">${esc(observed || '(nothing observed yet at this frame)')}</div>`;
   } else if (entry.kind === 'observer') {
     html = `
-      <div class="kind">observation ring</div>
+      <div class="kind">function</div>
       <h2>print</h2>
-      <div class="desc">What passes through the ring is observed and
-      projected onto the screen. Observed, never transformed.</div>`;
+      <div class="desc">The function print: what passes through its ring
+      is observed and projected onto the screen. Observed, never
+      transformed - the string is exactly what it was.</div>`;
+  } else if (entry.kind === 'plate') {
+    const lines = state.tape.events.slice(0, state.frame + 1)
+      .filter((e) => e.kind === 'line');
+    const last = lines[lines.length - 1];
+    html = `
+      <div class="kind">statement plate</div>
+      <h2>what is executing</h2>
+      <div class="desc">The code is the recipe. Matter materializes at
+      this plate when its line runs: the line is where values are
+      born.</div>
+      <div class="fact">${last ? `line ${last.line}: ${esc(last.code)}` : '(no line has run yet at this frame)'}</div>`;
   } else if (entry.kind === 'bench') {
     const endEv = state.tape.events.find((e) => e.kind === 'end');
     html = `
@@ -445,7 +477,8 @@ async function main() {
 
   state.codePlate = buildCodePlate();
   scene.add(state.codePlate);
-  state.codePlate.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'bench' }; });
+  state.codePlate.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'plate' }; });
+  state.pickables.push(state.codePlate);
 
   state.observer = buildObserver();
   scene.add(state.observer);
@@ -456,16 +489,9 @@ async function main() {
   scene.add(state.screen);
   state.screen.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
   state.pickables.push(state.screen);
-  const screenLabel = makeTextSprite('observation screen', '#5cf1b4', 36);
-  screenLabel.position.set(STAGE.screen.x, STAGE.screen.y + 14, STAGE.screen.z);
-  scene.add(screenLabel);
 
   state.beam = buildBeam();
   scene.add(state.beam);
-
-  const benchLabel = makeTextSprite(tape.program, '#3ddc97', 40);
-  benchLabel.position.set(0, 12, 52);
-  scene.add(benchLabel);
 
   // navigation: orbit, pan, zoom
   const target = new THREE.Vector3(0, 8, 0);
@@ -506,9 +532,30 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // picking: click anything to inspect it at this exact frame
+  // picking: click anything to inspect it at this exact frame; hover
+  // names it - identity comes from the tooltip, not floating billboards
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
+  const tooltip = document.getElementById('tooltip');
+  dom.addEventListener('pointermove', (e) => {
+    if (state.drag && state.drag.moved > 2) { tooltip.style.display = 'none'; return; }
+    ndc.set((e.clientX / window.innerWidth) * 2 - 1,
+      -(e.clientY / window.innerHeight) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(state.pickables, true);
+    const hit = hits.length ? hits[0].object.userData.pick : null;
+    if (hit) {
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 14) + 'px';
+      tooltip.style.top = (e.clientY + 14) + 'px';
+      tooltip.innerHTML = `<b>${hoverName(hit)}</b> <span style="color:#7c8f99">${hoverKind(hit)}</span>`;
+      dom.style.cursor = 'pointer';
+    } else {
+      tooltip.style.display = 'none';
+      dom.style.cursor = 'grab';
+    }
+  });
+
   dom.addEventListener('click', (e) => {
     if (state.drag && state.drag.moved > 6) return;
     ndc.set((e.clientX / window.innerWidth) * 2 - 1,
