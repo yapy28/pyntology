@@ -224,7 +224,8 @@ function applyFrame(f) {
 
   // matter: balls born above their line's lens; once an output happened
   // after their birth, they have dropped THROUGH the lens (observed,
-  // unchanged) and rest in the box below
+  // unchanged) and rest in the box below. Rewinding before their line
+  // un-births them (the fold is the only truth)
   let slot = 0;
   const seen = new Set();
   for (const ev of events) {
@@ -241,12 +242,22 @@ function applyFrame(f) {
       entry.targetPos = new THREE.Vector3(x, observed ? 12.5 : 25.5, 0);
     }
   }
+  for (const [id, entry] of state.matter) {
+    entry.group.visible = seen.has(id);
+  }
 
-  // observation: every output event adds a physical line to the wall
+  // observation: every output event adds a physical line to the wall;
+  // rewinding before a print removes its line again (the wall obeys
+  // the fold like everything else)
+  const outputCount = events.filter((e) => e.kind === 'output').length;
   events.filter((e) => e.kind === 'output').forEach((ev, index) => {
-    if (index < state.wallLines) return;
-    addWallLine(state.wall, ev.text, index);
-    state.wallLines = index + 1;
+    if (index >= state.wallLines) {
+      addWallLine(state.wall, ev.text, index);
+      state.wallLines = index + 1;
+    }
+  });
+  state.wall.children.forEach((child, i) => {
+    if (child !== state.wall.children[0]) child.visible = (i - 1) < outputCount;
   });
 }
 
