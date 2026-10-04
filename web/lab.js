@@ -3,12 +3,17 @@
  *
  * Matter from physics: values are physical things with shape by type
  * (strings are helices, numbers are orbs). Motion from machinery: the
- * program is apparatus on a bench; print is a microscope that observes
- * without transforming.
+ * program is apparatus on a bench; print is an observation ring that
+ * projects what it sees onto a screen and never transforms it.
  *
- * The renderer never parses Python and never guesses: every visual fact
- * comes from the tape's events, and the scene at frame f is the fold of
- * events 0..f - idempotent, so the playhead can scrub anywhere.
+ * Design rules learned the hard way:
+ *  - no figurative sculpture: every apparatus is a geometric glyph plus
+ *    a label; the metaphor lives in motion, never in a fake instrument
+ *  - matter is born at the statement plate that runs its line, then
+ *    flows through the story: plate -> observer -> screen
+ *  - the renderer never parses Python: every fact comes from the tape,
+ *    and the scene at frame f is the fold of events 0..f (idempotent,
+ *    so the playhead can scrub anywhere)
  */
 
 const TYPE_COLORS = {
@@ -16,12 +21,21 @@ const TYPE_COLORS = {
   NoneType: '#7c8f99', unknown: '#7c8f99',
 };
 
+// the stage: where each element of the story lives (world units)
+const STAGE = {
+  plate: { x: -34, y: 9, z: 0 },     // the statement plate
+  born: { x: -18, y: 9, z: 3 },      // matter materializes here
+  ring: { x: 2, y: 11, z: 0 },      // the observer ring (print)
+  parked: { x: 16, y: 9, z: 2 },    // matter after being observed
+  screen: { x: 38, y: 18, z: -16 }, // the observation screen
+};
+
 const state = {
   tape: null, frame: -1, playing: false,
-  shapes: new Map(),       // stable id -> {group, kind, fact, label}
-  screen: null, bench: null, beam: null, powerRing: null,
-  pickables: [], captions: new Map(),
-  camera: null, target: null, dist: 160, theta: 0.7, phi: 1.15,
+  shapes: new Map(),       // id -> {group, kind, fact, targetPos, born}
+  codePlate: null, observer: null, screen: null, beam: null,
+  powerRing: null, pickables: [],
+  camera: null, target: null, dist: 170, theta: 0.7, phi: 1.15,
   flyTo: null, drag: null,
 };
 
@@ -36,10 +50,9 @@ function makeTextSprite(text, color, size = 44) {
   c2.fillStyle = color;
   c2.fillText(text, 15, size + 2);
   const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.85, depthWrite: false });
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.9, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
-  // lab-scale mapping: labels are annotations, a fraction of the matter
-  // they describe - a 'Hello, world!' tag must fit inside the helix
+  // labels are annotations, a fraction of the matter they describe
   sprite.scale.set(w * 0.07, (size + 26) * 0.07, 1);
   sprite.raycast = () => {};
   return sprite;
@@ -52,8 +65,8 @@ function buildHelix(fact) {
   const text = fact.text ?? '';
   const len = fact.len ?? text.length;
   const color = TYPE_COLORS.str;
-  // scale rule: a string is a coiled cable; short strings show every
-  // character as a bead on the coil, long strings collapse the beads
+  // scale rule: short strings show every character as a bead on the
+  // coil; long strings collapse the beads into a coiled cable
   const showBeads = len <= 40;
   const radius = 2.6;
   const turns = Math.max(2, len / 3.5);
@@ -66,10 +79,9 @@ function buildHelix(fact) {
       radius * Math.cos(a), radius * Math.sin(a)));
   }
   const curve = new THREE.CatmullRomCurve3(pts);
-  const tube = new THREE.Mesh(
+  group.add(new THREE.Mesh(
     new THREE.TubeGeometry(curve, 200, 0.55, 8, false),
-    new THREE.MeshLambertMaterial({ color, emissive: 0x0c2229 }));
-  group.add(tube);
+    new THREE.MeshLambertMaterial({ color, emissive: 0x0c2229 })));
   if (showBeads) {
     for (let i = 0; i < len; i++) {
       const p = curve.getPointAt((i + 0.5) / len);
@@ -79,13 +91,9 @@ function buildHelix(fact) {
       bead.position.copy(p);
       group.add(bead);
     }
-  } else {
-    const label = makeTextSprite(`str of ${len} characters`, color, 36);
-    label.position.set(0, 7, 0);
-    group.add(label);
   }
   const tag = makeTextSprite(fact.repr || `'${text}'`, color, 40);
-  tag.position.set(0, radius + 8, 0);
+  tag.position.set(0, radius + 6, 0);
   group.add(tag);
   return group;
 }
@@ -95,12 +103,11 @@ function buildOrb(fact) {
   const color = TYPE_COLORS[fact.type] || TYPE_COLORS.unknown;
   const mag = Math.abs(parseFloat(fact.repr)) || 1;
   const r = 4 + Math.min(8, Math.log2(mag + 1) * 2);
-  const orb = new THREE.Mesh(
+  group.add(new THREE.Mesh(
     new THREE.SphereGeometry(r, 24, 18),
-    new THREE.MeshLambertMaterial({ color, emissive: 0x1a1a10 }));
-  group.add(orb);
+    new THREE.MeshLambertMaterial({ color, emissive: 0x1a1a10 })));
   const tag = makeTextSprite(fact.repr, color, 40);
-  tag.position.set(0, r + 6, 0);
+  tag.position.set(0, r + 5, 0);
   group.add(tag);
   return group;
 }
@@ -110,12 +117,12 @@ function buildOrb(fact) {
 function buildBench() {
   const group = new THREE.Group();
   const slab = new THREE.Mesh(
-    new THREE.CylinderGeometry(38, 44, 5, 48),
+    new THREE.CylinderGeometry(44, 48, 5, 48),
     new THREE.MeshLambertMaterial({ color: 0x182329 }));
   slab.position.y = -2.5;
   group.add(slab);
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(38, 0.8, 12, 64),
+    new THREE.TorusGeometry(44, 0.8, 12, 64),
     new THREE.MeshLambertMaterial({ color: '#3ddc97', emissive: 0x0f3d29 }));
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 0.5;
@@ -124,47 +131,82 @@ function buildBench() {
   return group;
 }
 
-function buildMicroscope() {
+function buildCodePlate() {
+  // the statement plate: what is executing, readable from the camera
   const group = new THREE.Group();
-  const metal = new THREE.MeshLambertMaterial({ color: 0x3a4a52 });
-  const stand = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.2, 16, 12), metal);
-  stand.position.set(0, 8, 0);
-  group.add(stand);
-  const arm = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 10, 10), metal);
-  arm.rotation.z = Math.PI / 3.2;
-  arm.position.set(-3.4, 14, 0);
-  group.add(arm);
-  const lens = new THREE.Mesh(
-    new THREE.TorusGeometry(4.2, 1.3, 14, 40),
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(24, 9, 1.2),
+    new THREE.MeshLambertMaterial({ color: 0x101c22 }));
+  const face = new THREE.Mesh(
+    new THREE.PlaneGeometry(22, 7.6),
+    new THREE.MeshBasicMaterial({ transparent: true }));
+  face.position.z = 0.7;
+  group.add(plate);
+  group.add(face);
+  group.userData.face = face;
+  group.position.set(STAGE.plate.x, STAGE.plate.y, STAGE.plate.z);
+  group.rotation.y = 0.35;
+  return group;
+}
+
+function codePlateTexture(lineNo, code) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 176;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#101c22';
+  ctx.fillRect(0, 0, 512, 176);
+  ctx.font = '600 26px "SF Mono", Menlo, Consolas, monospace';
+  ctx.fillStyle = '#7c8f99';
+  ctx.fillText(`line ${lineNo}`, 20, 44);
+  ctx.fillStyle = '#5cf1b4';
+  const short = code.length > 40 ? code.slice(0, 39) + '…' : code;
+  ctx.fillText(short, 20, 108);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function buildObserver() {
+  // the observation ring: print as a geometric glyph, never a sculpture.
+  // What passes through it is projected, not transformed.
+  const group = new THREE.Group();
+  const post = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.9, 1.3, 11, 10),
+    new THREE.MeshLambertMaterial({ color: 0x3a4a52 }));
+  post.position.set(0, -5.5, 0);
+  group.add(post);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(5.5, 1.0, 14, 48),
     new THREE.MeshLambertMaterial({ color: '#9fb8c4', emissive: 0x1c2830 }));
-  lens.rotation.y = Math.PI / 2;
-  lens.position.set(-8.5, 16, 0);
-  group.add(lens);
-  const eyepiece = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.4, 5, 12), metal);
-  eyepiece.rotation.z = Math.PI / 2.4;
-  eyepiece.position.set(-11, 20, 0);
-  group.add(eyepiece);
+  ring.rotation.y = Math.PI / 2;
+  group.add(ring);
+  const label = makeTextSprite('print', '#5cf1b4', 36);
+  label.position.set(0, 9, 0);
+  group.add(label);
+  group.position.set(STAGE.ring.x, STAGE.ring.y, STAGE.ring.z);
   return group;
 }
 
 function buildScreen() {
   const group = new THREE.Group();
   const frame = new THREE.Mesh(
-    new THREE.BoxGeometry(34, 20, 1.5),
+    new THREE.BoxGeometry(30, 18, 1.5),
     new THREE.MeshLambertMaterial({ color: 0x182329 }));
   group.add(frame);
   const face = new THREE.Mesh(
-    new THREE.PlaneGeometry(31, 17),
+    new THREE.PlaneGeometry(27, 15.4),
     new THREE.MeshBasicMaterial({ color: 0x0b1013 }));
   face.position.z = 0.9;
   group.add(face);
   const textPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(29, 15),
+    new THREE.PlaneGeometry(25.5, 14),
     new THREE.MeshBasicMaterial({ transparent: true }));
   textPlane.position.z = 1.0;
   group.add(textPlane);
   group.userData.textPlane = textPlane;
   group.userData.face = face;
+  group.position.set(STAGE.screen.x, STAGE.screen.y, STAGE.screen.z);
+  group.rotation.y = -0.32;
   return group;
 }
 
@@ -185,6 +227,24 @@ function screenTexture(text) {
   return tex;
 }
 
+function buildBeam() {
+  // a visible light cone: observer -> screen, alive while observing
+  const a = new THREE.Vector3(STAGE.ring.x, STAGE.ring.y, STAGE.ring.z);
+  const b = new THREE.Vector3(STAGE.screen.x, STAGE.screen.y, STAGE.screen.z);
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
+  const geo = new THREE.CylinderGeometry(0.6, 2.4, dir.length(), 12, 1, true);
+  const beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: '#5cf1b4', transparent: true, opacity: 0.35,
+    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  beam.position.copy(mid);
+  beam.quaternion.setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  beam.visible = false;
+  return beam;
+}
+
 // ---- the fold: scene state from events 0..f --------------------------
 
 function eventCaption(ev) {
@@ -200,7 +260,7 @@ function eventCaption(ev) {
     case 'line': return `line ${ev.line}: <code>${ev.code || ''}</code>`;
     case 'assign':
       return `${ev.name} = ${ev.value?.repr ?? ''}  (bound in ${ev.scope})`;
-    case 'output': return `the microscope observes: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
+    case 'output': return `the observer projects: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
     case 'exception':
       return `alarm: ${ev.exc} — ${ev.text || ''}${ev.uncaught ? ' (uncaught, the experiment dies)' : ''}`;
     default: return ev.kind;
@@ -208,14 +268,26 @@ function eventCaption(ev) {
 }
 
 function applyFrame(f) {
-  const tape = state.tape;
-  const events = tape.events.slice(0, f + 1);
-  // bench power
+  const events = state.tape.events.slice(0, f + 1);
   const started = events.some((e) => e.kind === 'start');
   const ended = events.some((e) => e.kind === 'end');
   state.powerRing.material.emissive.setHex(
     ended ? 0x0f2018 : started ? 0x2d8f5f : 0x0f2029);
-  // matter: every literal materialized by a line that has run
+
+  // the statement plate shows the last line that ran
+  const lines = events.filter((e) => e.kind === 'line');
+  state.codePlate.userData.face.material.map =
+    lines.length ? codePlateTexture(lines[lines.length - 1].line,
+      lines[lines.length - 1].code) : null;
+  state.codePlate.userData.face.material.needsUpdate = true;
+  state.codePlate.visible = lines.length > 0;
+
+  // matter: born at the plate when its line runs; once an observation
+  // happened after its birth, it has flowed through the ring and parks
+  const firstOutputAfter = (lineIdx) => {
+    const out = events.find((e) => e.kind === 'output');
+    return out !== undefined && out.i > lineIdx ? out : null;
+  };
   let slot = 0;
   const seen = new Set();
   for (const ev of events) {
@@ -225,31 +297,34 @@ function applyFrame(f) {
       slot++;
       if (seen.has(id)) continue;
       seen.add(id);
-      materialize(id, fact, slot - 1);
+      const entry = materialize(id, fact, slot - 1);
+      const observed = firstOutputAfter(events.indexOf(ev));
+      const base = observed ? STAGE.parked : STAGE.born;
+      entry.targetPos = new THREE.Vector3(
+        base.x, base.y + (slot - 1 > 2 ? (slot - 3) * 2 : 0), base.z);
     }
   }
+
   // observation: everything printed so far, on the screen
   const observed = events.filter((e) => e.kind === 'output')
     .map((e) => e.text).join('');
   state.screen.userData.textPlane.material.map = screenTexture(observed);
   state.screen.userData.face.material.color.setHex(observed ? 0x0b2018 : 0x0b1013);
-  state.screen.visible = events.some((e) => e.kind === 'line');
-  state.beam.visible = false;
 }
 
 function materialize(id, fact, slotIndex) {
-  if (state.shapes.has(id)) return;
+  if (state.shapes.has(id)) return state.shapes.get(id);
   const group = fact.type === 'str' ? buildHelix(fact) : buildOrb(fact);
-  const lane = Math.floor(slotIndex / 3);
-  const row = slotIndex % 3;
-  group.position.set(-34 + row * 4, 8 + lane * 16, -6 + row * 6);
+  group.position.set(STAGE.born.x, STAGE.born.y, STAGE.born.z);
   scene.add(group);
-  const entry = { group, kind: 'matter', fact };
+  const entry = { group, kind: 'matter', fact,
+    targetPos: new THREE.Vector3(STAGE.born.x, STAGE.born.y, STAGE.born.z) };
   group.traverse((o) => { o.userData.pick = entry; });
   state.shapes.set(id, entry);
   state.pickables.push(group);
   entry.group.scale.setScalar(0.01);
   entry.born = performance.now();
+  return entry;
 }
 
 // ---- playback ---------------------------------------------------------
@@ -262,24 +337,11 @@ function setFrame(f, { pulses = false } = {}) {
   const cap = document.getElementById('caption');
   const ev = state.tape.events[f];
   cap.innerHTML = ev ? eventCaption(ev) : '&nbsp;';
-  if (pulses && ev) pulseFor(ev);
-}
-
-function pulseFor(ev) {
-  if (ev.kind === 'line') {
-    // new matter grows into existence
-    for (const entry of state.shapes.values()) {
-      if (entry.fact && entry.born && performance.now() - entry.born < 3000) {
-        entry.born = performance.now();
-      }
+  if (pulses && ev) {
+    if (ev.kind === 'output') {
+      state.beam.visible = true;
+      state.beam.userData.until = performance.now() + 1800;
     }
-  }
-  if (ev.kind === 'output') {
-    state.beam.visible = true;
-    state.beam.userData.until = performance.now() + 1600;
-  }
-  if (ev.kind === 'end') {
-    state.powerRing.userData.flash = performance.now();
   }
 }
 
@@ -290,7 +352,7 @@ async function playLoop() {
   while (state.playing && state.frame < state.tape.events.length - 1) {
     setFrame(state.frame + 1, { pulses: true });
     const ev = state.tape.events[state.frame];
-    await new Promise((r) => setTimeout(r, (ev.kind === 'line' ? 1400 : 1100)));
+    await new Promise((r) => setTimeout(r, ev.kind === 'line' ? 1600 : 1100));
   }
   state.playing = false;
   btn.textContent = 'Play';
@@ -308,8 +370,8 @@ function renderPanel(entry) {
     html = `
       <div class="kind">${fact.type} matter</div>
       <h2>${esc(fact.repr || '')}</h2>
-      <div class="desc">A value that exists while this line runs. Its shape
-      is its type; its size is its magnitude. Observation does not
+      <div class="desc">A value that exists while this line runs. Its
+      shape is its type; its size is its magnitude. Observation does not
       transform it.</div>
       <div class="fact">type: ${fact.type}${fact.len !== undefined ? `\nlength: ${fact.len} characters` : ''}</div>
       <div class="fact">value: ${esc(fact.text ?? fact.repr ?? '')}</div>`;
@@ -318,11 +380,17 @@ function renderPanel(entry) {
       .filter((e) => e.kind === 'output').map((e) => e.text).join('');
     html = `
       <div class="kind">observation screen</div>
-      <h2>the microscope viewport</h2>
+      <h2>the print projection</h2>
       <div class="desc">print projects matter onto this screen. The
       projection is a readout, not the matter: the string on the bench is
       untouched.</div>
       <div class="fact">${esc(observed || '(nothing observed yet at this frame)')}</div>`;
+  } else if (entry.kind === 'observer') {
+    html = `
+      <div class="kind">observation ring</div>
+      <h2>print</h2>
+      <div class="desc">What passes through the ring is observed and
+      projected onto the screen. Observed, never transformed.</div>`;
   } else if (entry.kind === 'bench') {
     const endEv = state.tape.events.find((e) => e.kind === 'end');
     html = `
@@ -357,7 +425,7 @@ async function main() {
   document.body.appendChild(renderer.domElement);
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#0d1418');
-  scene.fog = new THREE.Fog(0x0d1418, 260, 800);
+  scene.fog = new THREE.Fog(0x0d1418, 300, 900);
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
   state.camera = camera;
   scene.add(new THREE.AmbientLight(0xffffff, 0.85));
@@ -365,49 +433,42 @@ async function main() {
   key.position.set(60, 90, 40);
   scene.add(key);
 
-  // the room
   const floor = new THREE.GridHelper(600, 60, 0x23323a, 0x17222a);
   floor.position.y = -30;
   scene.add(floor);
 
-  // the bench
+  // the story, left to right: plate -> born -> ring -> parked -> screen
   state.bench = buildBench();
   scene.add(state.bench);
-  state.bench.userData.pick = { kind: 'bench' };
-  state.bench.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'bench' }; });
+  state.bench.traverse((o) => { o.userData.pick = { kind: 'bench' }; });
   state.pickables.push(state.bench);
 
-  // the microscope, aimed at the matter lane
-  const scope = buildMicroscope();
-  scope.position.set(24, 0, 2);
-  scope.rotation.y = -Math.PI / 2;
-  scene.add(scope);
+  state.codePlate = buildCodePlate();
+  scene.add(state.codePlate);
+  state.codePlate.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'bench' }; });
 
-  // the observation screen, standing where the camera can read it
+  state.observer = buildObserver();
+  scene.add(state.observer);
+  state.observer.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'observer' }; });
+  state.pickables.push(state.observer);
+
   state.screen = buildScreen();
-  state.screen.position.set(-4, 26, -58);
   scene.add(state.screen);
-  state.screen.userData.pick = { kind: 'screen' };
   state.screen.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
   state.pickables.push(state.screen);
-  const screenLabel = makeTextSprite('observation screen (print)', '#5cf1b4', 36);
-  screenLabel.position.set(-4, 38, -58);
+  const screenLabel = makeTextSprite('observation screen', '#5cf1b4', 36);
+  screenLabel.position.set(STAGE.screen.x, STAGE.screen.y + 14, STAGE.screen.z);
   scene.add(screenLabel);
 
-  // the observation beam: lens -> screen, only while observing
-  const beamGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(8, 16, 2), new THREE.Vector3(-4, 24, -50)]);
-  state.beam = new THREE.Line(beamGeo,
-    new THREE.LineBasicMaterial({ color: '#5cf1b4', transparent: true, opacity: 0.85 }));
-  state.beam.visible = false;
+  state.beam = buildBeam();
   scene.add(state.beam);
 
   const benchLabel = makeTextSprite(tape.program, '#3ddc97', 40);
-  benchLabel.position.set(0, 10, 46);
+  benchLabel.position.set(0, 12, 52);
   scene.add(benchLabel);
 
-  // navigation: orbit, pan, zoom (the same model as the onion)
-  const target = new THREE.Vector3(0, 6, 0);
+  // navigation: orbit, pan, zoom
+  const target = new THREE.Vector3(0, 8, 0);
   state.target = target;
   const dom = renderer.domElement;
   dom.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -445,7 +506,7 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // picking: click matter to inspect it at this exact frame
+  // picking: click anything to inspect it at this exact frame
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   dom.addEventListener('click', (e) => {
@@ -492,7 +553,8 @@ async function main() {
 
   setFrame(0);
 
-  // animation loop: eased flight, matter growing in, beam fading
+  // animation loop: eased flight, matter growing and gliding to its
+  // fold position (scrub-safe: the target is always fold-derived)
   const frame = () => {
     const now = performance.now();
     if (state.flyTo) {
@@ -508,13 +570,11 @@ async function main() {
         entry.group.scale.setScalar(0.01 + 0.99 * (1 - Math.pow(1 - s, 3)));
         if (s >= 1) delete entry.born;
       }
+      entry.group.position.lerp(entry.targetPos, 0.06);
     }
     if (state.beam.visible && state.beam.userData.until
         && now > state.beam.userData.until) {
       state.beam.visible = false;
-    }
-    if (state.powerRing.userData.flash && now - state.powerRing.userData.flash < 900) {
-      state.powerRing.material.emissive.setHex(0x2d8f5f);
     }
     camera.position.set(
       target.x + state.dist * Math.sin(state.phi) * Math.cos(state.theta),

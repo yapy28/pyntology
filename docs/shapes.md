@@ -6,6 +6,17 @@ Values are physical things whose properties encode Python semantics; the
 program is apparatus on a bench. If a shape carries no semantic truth of
 Python, it is decoration and is rejected.
 
+A second rule, learned the hard way in lesson 1: **no figurative
+sculpture.** Apparatus is rendered as geometric glyphs plus labels, and
+the metaphor lives in motion — beams, glides, pulses — never in a fake
+instrument assembled from cylinders. A torus that behaves like a lens
+reads; a "microscope" built from primitives reads as a statue with a
+donut on a branch.
+
+A third: **matter has a birthplace.** Values materialize at the
+statement plate of the line that brings them into existence, then flow
+through the story. Nothing appears out of thin air.
+
 ## The entry contract
 
 No shape ships without a completed entry in this document. Every entry
@@ -65,20 +76,37 @@ has six fields:
 5. **Forced by**: lesson 1's scaffold; first exercised by lesson 2
    (pay).
 
-### print — the microscope and observation screen
+### print — the observation ring and screen
 
 0. **Scale**: the screen shows the first 9 lines of output, each capped
    at ~46 characters; the inspector carries everything captured so far.
 1. **Semantics**: printing is *non-destructive observation*. The value
-   is projected onto a screen; the matter itself is never touched.
-2. **Visual spec**: a lens (torus) on an arm aimed at the matter lane;
-   a beam fires lens → screen during observation; the screen is a dark
-   plane with a terminal-green readout.
+   passes through the ring and is projected onto a screen; the matter
+   itself is never touched.
+2. **Visual spec**: a glowing torus on a thin post, labeled `print` — a
+   geometric glyph, explicitly NOT a figurative microscope. When a value
+   passes through, a light cone fires ring → screen and the readout
+   appears on the screen.
 3. **Interactions**: click the screen to read everything observed up to
-   the current frame; click matter to confirm it is unchanged.
+   the current frame; click the ring for what it does; click matter to
+   confirm it is unchanged.
 4. **Why this shape**: beginners believe `print(x)` *does something to*
-   x. The microscope says: observation, never transformation — the
-   lesson lives in the geometry, not in a caption.
+   x. The projection says: observed, never transformed — the lesson
+   lives in the motion, not in a caption or a sculpture.
+5. **Forced by**: lesson 1 (hello).
+
+### The statement plate
+
+0. **Scale**: one plate per program showing the most recently executed
+   line; later lessons grow one plate per function body.
+1. **Semantics**: code is the recipe the experiment follows; the plate
+   is *what is executing right now*.
+2. **Visual spec**: a small dark plaque showing the line number and
+   source text, standing at the head of the bench where matter is born.
+3. **Interactions**: part of the bench inspection.
+4. **Why this shape**: matter needs a birthplace — the helix materializes
+   at the plate, so "this line created this value" is spatial, not
+   implied.
 5. **Forced by**: lesson 1 (hello).
 
 ### The program — the experiment bench
