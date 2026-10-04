@@ -6,6 +6,9 @@ regenerate with `python3 src/render_concepts.py`.
 
 The rules of the database:
 
+- `id` is a stable, readable slug - never a number. It is
+  what other rows reference; `concept` is the display label
+  (the rdfs:label pattern: two jobs, similar strings).
 - Free text is allowed ONLY in `definition`, `example` and
   `shape`. Every other column is a controlled term.
 - `possible_inputs` / `possible_outputs` are semicolon-separated
