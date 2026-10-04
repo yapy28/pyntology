@@ -38,9 +38,9 @@ function makeTextSprite(text, color, size = 44) {
   const tex = new THREE.CanvasTexture(canvas);
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.85, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
-  // lab-scale mapping: the scene is tens of units across, labels must
-  // stay small next to the matter, not shout over it
-  sprite.scale.set(w * 0.16, (size + 26) * 0.16, 1);
+  // lab-scale mapping: labels are annotations, a fraction of the matter
+  // they describe - a 'Hello, world!' tag must fit inside the helix
+  sprite.scale.set(w * 0.07, (size + 26) * 0.07, 1);
   sprite.raycast = () => {};
   return sprite;
 }
