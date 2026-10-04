@@ -1,19 +1,17 @@
 /* Pyntology lab: renders a tape - the honest record of one real run of a
- * small Python program - as a laboratory experiment.
+ * small Python program - as boxes, pipes and flowing matter.
  *
- * Matter from physics: values are physical things with shape by type
- * (strings are helices, numbers are orbs). Motion from machinery: the
- * program is apparatus on a bench; print is an observation ring that
- * projects what it sees onto a screen and never transforms it.
- *
- * Design rules learned the hard way:
- *  - no figurative sculpture: every apparatus is a geometric glyph plus
- *    a label; the metaphor lives in motion, never in a fake instrument
- *  - matter is born at the statement plate that runs its line, then
- *    flows through the story: plate -> observer -> screen
- *  - the renderer never parses Python: every fact comes from the tape,
- *    and the scene at frame f is the fold of events 0..f (idempotent,
- *    so the playhead can scrub anywhere)
+ * The design contract (settled with the user, lesson 1):
+ *  - boxes are lines of code: the code is readable on the box face;
+ *    boxes sit in the room in reading order
+ *  - pipes carry balls: a value born from a line's literal is a ball
+ *    that flows through a visible pipe into the box that consumes it;
+ *    transit glows, arrival lands
+ *  - the working box is the playhead: execution is which box's pipes
+ *    are active. Nothing moves that isn't matter going somewhere.
+ *  - the renderer never parses Python: every visual fact comes from the
+ *    tape, and the scene at frame f is the fold of events 0..f
+ *    (idempotent, so the playhead can scrub anywhere)
  */
 
 const TYPE_COLORS = {
@@ -21,163 +19,100 @@ const TYPE_COLORS = {
   NoneType: '#7c8f99', unknown: '#7c8f99',
 };
 
-// the stage: where each element of the story lives (world units)
-const STAGE = {
-  plate: { x: -34, y: 9, z: 0 },     // the statement plate
-  born: { x: -18, y: 9, z: 3 },      // matter materializes here
-  ring: { x: 2, y: 11, z: 0 },      // the observer ring (print)
-  parked: { x: 16, y: 9, z: 2 },    // matter after being observed
-  screen: { x: 38, y: 18, z: -16 }, // the observation screen
-};
+const FLOW = '#5cf1b4';
 
 const state = {
   tape: null, frame: -1, playing: false,
-  shapes: new Map(),       // id -> {group, kind, fact, targetPos, born}
-  codePlate: null, observer: null, screen: null, beam: null,
-  powerRing: null, pickables: [],
+  boxes: new Map(),        // line -> {group, face, kind: 'box', line, code}
+  matter: new Map(),       // id -> {group, kind: 'matter', fact, line, targetPos}
+  pipes: [],               // {mesh, until}
+  cone: null, screen: null, floor: null,
+  pickables: [],
   camera: null, target: null, dist: 170, theta: 0.7, phi: 1.15,
   flyTo: null, drag: null,
 };
 
-function makeTextSprite(text, color, size = 44) {
+// ---- geometry helpers -------------------------------------------------
+
+function boxX(index) {
+  // boxes sit in the room in reading order, left to right
+  return -40 + index * 36;
+}
+
+function codeTexture(lineNo, code) {
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  ctx.font = `600 ${size}px -apple-system, Segoe UI, Roboto, sans-serif`;
-  const w = Math.max(60, ctx.measureText(text).width + 30);
-  canvas.width = w; canvas.height = size + 26;
-  const c2 = canvas.getContext('2d');
-  c2.font = `600 ${size}px -apple-system, Segoe UI, Roboto, sans-serif`;
-  c2.fillStyle = color;
-  c2.fillText(text, 15, size + 2);
-  const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.9, depthWrite: false });
-  const sprite = new THREE.Sprite(mat);
-  // labels are annotations, a fraction of the matter they describe
-  sprite.scale.set(w * 0.07, (size + 26) * 0.07, 1);
-  sprite.raycast = () => {};
-  return sprite;
-}
-
-// ---- the matter ------------------------------------------------------
-
-function buildHelix(fact) {
-  const group = new THREE.Group();
-  const text = fact.text ?? '';
-  const len = fact.len ?? text.length;
-  const color = TYPE_COLORS.str;
-  // scale rule: short strings show every character as a bead on the
-  // coil; long strings collapse the beads into a coiled cable. The
-  // value itself lives in hover/click, never on a floating billboard.
-  const showBeads = len <= 40;
-  const radius = 2.0;
-  const turns = Math.max(2, len / 3.5);
-  const length = Math.max(12, len * 1.4);
-  const pts = [];
-  for (let i = 0; i <= 120; i++) {
-    const t = i / 120;
-    const a = t * turns * Math.PI * 2;
-    pts.push(new THREE.Vector3(t * length - length / 2,
-      radius * Math.cos(a), radius * Math.sin(a)));
-  }
-  const curve = new THREE.CatmullRomCurve3(pts);
-  group.add(new THREE.Mesh(
-    new THREE.TubeGeometry(curve, 160, 0.45, 8, false),
-    new THREE.MeshLambertMaterial({ color, emissive: 0x0c2229 })));
-  if (showBeads) {
-    for (let i = 0; i < len; i++) {
-      const p = curve.getPointAt((i + 0.5) / len);
-      const bead = new THREE.Mesh(
-        new THREE.SphereGeometry(0.85, 10, 8),
-        new THREE.MeshLambertMaterial({ color: '#dff4ff', emissive: 0x223138 }));
-      bead.position.copy(p);
-      group.add(bead);
-    }
-  }
-  return group;
-}
-
-function buildOrb(fact) {
-  const group = new THREE.Group();
-  const color = TYPE_COLORS[fact.type] || TYPE_COLORS.unknown;
-  const mag = Math.abs(parseFloat(fact.repr)) || 1;
-  const r = 3 + Math.min(6, Math.log2(mag + 1) * 1.5);
-  group.add(new THREE.Mesh(
-    new THREE.SphereGeometry(r, 24, 18),
-    new THREE.MeshLambertMaterial({ color, emissive: 0x1a1a10 })));
-  return group;
-}
-
-// ---- the apparatus ---------------------------------------------------
-
-function buildBench() {
-  const group = new THREE.Group();
-  const slab = new THREE.Mesh(
-    new THREE.CylinderGeometry(44, 48, 5, 48),
-    new THREE.MeshLambertMaterial({ color: 0x182329 }));
-  slab.position.y = -2.5;
-  group.add(slab);
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(44, 0.8, 12, 64),
-    new THREE.MeshLambertMaterial({ color: '#3ddc97', emissive: 0x0f3d29 }));
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.5;
-  group.add(ring);
-  state.powerRing = ring;
-  return group;
-}
-
-function buildCodePlate() {
-  // the statement plate: what is executing, readable from the camera
-  const group = new THREE.Group();
-  const plate = new THREE.Mesh(
-    new THREE.BoxGeometry(24, 9, 1.2),
-    new THREE.MeshLambertMaterial({ color: 0x101c22 }));
-  const face = new THREE.Mesh(
-    new THREE.PlaneGeometry(22, 7.6),
-    new THREE.MeshBasicMaterial({ transparent: true }));
-  face.position.z = 0.7;
-  group.add(plate);
-  group.add(face);
-  group.userData.face = face;
-  group.position.set(STAGE.plate.x, STAGE.plate.y, STAGE.plate.z);
-  group.rotation.y = 0.35;
-  return group;
-}
-
-function codePlateTexture(lineNo, code) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512; canvas.height = 176;
+  canvas.width = 512; canvas.height = 160;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#101c22';
-  ctx.fillRect(0, 0, 512, 176);
-  ctx.font = '600 26px "SF Mono", Menlo, Consolas, monospace';
+  ctx.fillRect(0, 0, 512, 160);
+  ctx.font = '600 24px "SF Mono", Menlo, Consolas, monospace';
   ctx.fillStyle = '#7c8f99';
-  ctx.fillText(`line ${lineNo}`, 20, 44);
+  ctx.fillText(`line ${lineNo}`, 22, 40);
   ctx.fillStyle = '#5cf1b4';
-  const short = code.length > 40 ? code.slice(0, 39) + '…' : code;
-  ctx.fillText(short, 20, 108);
+  const short = code.length > 42 ? code.slice(0, 41) + '…' : code;
+  ctx.fillText(short, 22, 96);
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
   return tex;
 }
 
-function buildObserver() {
-  // the observation ring: print as a geometric glyph, never a sculpture.
-  // What passes through it is projected, not transformed. Its identity
-  // comes from hover and click, not from a floating label.
+function buildLineBox(index, lineNo, code) {
   const group = new THREE.Group();
-  const post = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.9, 1.3, 11, 10),
-    new THREE.MeshLambertMaterial({ color: 0x3a4a52 }));
-  post.position.set(0, -5.5, 0);
-  group.add(post);
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(5.5, 1.0, 14, 48),
-    new THREE.MeshLambertMaterial({ color: '#9fb8c4', emissive: 0x1c2830 }));
-  ring.rotation.y = Math.PI / 2;
-  group.add(ring);
-  group.position.set(STAGE.ring.x, STAGE.ring.y, STAGE.ring.z);
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(26, 9, 11),
+    new THREE.MeshLambertMaterial({ color: 0x182329 }));
+  group.add(body);
+  const face = new THREE.Mesh(
+    new THREE.PlaneGeometry(24, 7.4),
+    new THREE.MeshBasicMaterial({ transparent: true }));
+  face.position.z = 5.7;
+  group.add(face);
+  group.userData.face = face;
+  group.userData.body = body;
+  group.userData.line = lineNo;
+  group.userData.code = code;
+  group.position.set(boxX(index), 12, 0);
   return group;
+}
+
+function buildBall(fact) {
+  // matter in transit: a ball whose identity lives in hover and click.
+  // Strings can be cracked open later; for now the ball IS the value.
+  const group = new THREE.Group();
+  const color = TYPE_COLORS[fact.type] || TYPE_COLORS.unknown;
+  const r = fact.type === 'str' ? 3.4 : 3;
+  const ball = new THREE.Mesh(
+    new THREE.SphereGeometry(r, 20, 16),
+    new THREE.MeshLambertMaterial({ color, emissive: 0x14222a }));
+  group.add(ball);
+  group.userData.ball = ball;
+  return group;
+}
+
+function buildIntakePipe(x) {
+  // the pipe from where a line's literals are born down into its box
+  const geo = new THREE.CylinderGeometry(2.0, 2.0, 8, 14, 1, true);
+  const pipe = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: FLOW, transparent: true, opacity: 0.12,
+    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  pipe.position.set(x, 20.5, 0);
+  return pipe;
+}
+
+function buildCone(from, to) {
+  const dir = new THREE.Vector3().subVectors(to, from);
+  const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
+  const geo = new THREE.CylinderGeometry(0.6, 3.0, dir.length(), 12, 1, true);
+  const cone = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: FLOW, transparent: true, opacity: 0.3,
+    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  cone.position.copy(mid);
+  cone.quaternion.setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  cone.visible = false;
+  return cone;
 }
 
 function buildScreen() {
@@ -198,8 +133,8 @@ function buildScreen() {
   group.add(textPlane);
   group.userData.textPlane = textPlane;
   group.userData.face = face;
-  group.position.set(STAGE.screen.x, STAGE.screen.y, STAGE.screen.z);
-  group.rotation.y = -0.32;
+  group.position.set(20, 26, -34);
+  group.rotation.y = -0.3;
   return group;
 }
 
@@ -210,7 +145,7 @@ function screenTexture(text) {
   ctx.fillStyle = '#0b1013';
   ctx.fillRect(0, 0, 640, 360);
   ctx.font = '600 26px "SF Mono", Menlo, Consolas, monospace';
-  ctx.fillStyle = '#5cf1b4';
+  ctx.fillStyle = FLOW;
   const lines = (text || '').replace(/\n$/, '').split('\n');
   lines.slice(0, 9).forEach((line, idx) => {
     ctx.fillText(line.length > 46 ? line.slice(0, 45) + '…' : line, 24, 44 + idx * 34);
@@ -220,45 +155,14 @@ function screenTexture(text) {
   return tex;
 }
 
-function buildBeam() {
-  // a visible light cone: observer -> screen, alive while observing
-  const a = new THREE.Vector3(STAGE.ring.x, STAGE.ring.y, STAGE.ring.z);
-  const b = new THREE.Vector3(STAGE.screen.x, STAGE.screen.y, STAGE.screen.z);
-  const dir = new THREE.Vector3().subVectors(b, a);
-  const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
-  const geo = new THREE.CylinderGeometry(0.6, 2.4, dir.length(), 12, 1, true);
-  const beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    color: '#5cf1b4', transparent: true, opacity: 0.35,
-    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
-  }));
-  beam.position.copy(mid);
-  beam.quaternion.setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-  beam.visible = false;
-  return beam;
-}
-
-function buildWire() {
-  // the data path: from the statement that creates the value to the
-  // function that receives it. Faint at rest, glows while a value
-  // travels through print.
-  const a = new THREE.Vector3(STAGE.plate.x + 13, STAGE.plate.y - 1, STAGE.plate.z);
-  const b = new THREE.Vector3(STAGE.ring.x - 6.5, STAGE.ring.y, STAGE.ring.z);
-  const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-  const wire = new THREE.Line(geo, new THREE.LineBasicMaterial({
-    color: '#5cf1b4', transparent: true, opacity: 0.22,
-  }));
-  return wire;
-}
-
 // ---- the fold: scene state from events 0..f --------------------------
 
 function eventCaption(ev) {
   switch (ev.kind) {
-    case 'start': return 'the experiment powers on';
-    case 'end': return `the experiment ends — exit code ${ev.code}`;
+    case 'start': return 'the program starts';
+    case 'end': return `the program ends — exit code ${ev.code}`;
     case 'call_enter':
-      return ev.func === '<module>' ? 'the module loads: the bench goes live'
+      return ev.func === '<module>' ? 'the module loads'
         : `machine ${ev.func} starts`;
     case 'call_return':
       return ev.func === '<module>' ? 'the module finishes'
@@ -266,34 +170,43 @@ function eventCaption(ev) {
     case 'line': return `line ${ev.line}: <code>${ev.code || ''}</code>`;
     case 'assign':
       return `${ev.name} = ${ev.value?.repr ?? ''}  (bound in ${ev.scope})`;
-    case 'output': return `print observes: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
+    case 'output': return `print writes to stdout: <code>${(ev.text || '').replace(/\n$/, '')}</code>`;
     case 'exception':
-      return `alarm: ${ev.exc} — ${ev.text || ''}${ev.uncaught ? ' (uncaught, the experiment dies)' : ''}`;
+      return `alarm: ${ev.exc} — ${ev.text || ''}${ev.uncaught ? ' (uncaught, the program dies)' : ''}`;
     default: return ev.kind;
   }
 }
 
 function applyFrame(f) {
   const events = state.tape.events.slice(0, f + 1);
-  const started = events.some((e) => e.kind === 'start');
-  const ended = events.some((e) => e.kind === 'end');
-  state.powerRing.material.emissive.setHex(
-    ended ? 0x0f2018 : started ? 0x2d8f5f : 0x0f2029);
 
-  // the statement plate shows the last line that ran
-  const lines = events.filter((e) => e.kind === 'line');
-  state.codePlate.userData.face.material.map =
-    lines.length ? codePlateTexture(lines[lines.length - 1].line,
-      lines[lines.length - 1].code) : null;
-  state.codePlate.userData.face.material.needsUpdate = true;
-  state.codePlate.visible = lines.length > 0;
+  // boxes: one per executed line, in reading order
+  const executed = [];
+  const seenLines = new Set();
+  for (const ev of events) {
+    if (ev.kind === 'line' && !seenLines.has(ev.line)) {
+      seenLines.add(ev.line);
+      executed.push(ev);
+    }
+  }
+  executed.forEach((ev, index) => {
+    const id = ev.line;
+    if (!state.boxes.has(id)) {
+      const group = buildLineBox(index, ev.line, ev.code);
+      group.userData.face.material.map = codeTexture(ev.line, ev.code);
+      scene.add(group);
+      const pipe = buildIntakePipe(boxX(index));
+      scene.add(pipe);
+      state.pipes.push({ mesh: pipe, until: 0 });
+      group.userData.pick = { kind: 'box', line: ev.line, code: ev.code };
+      group.traverse((o) => { o.userData.pick = o.userData.pick || group.userData.pick; });
+      state.pickables.push(group);
+      state.boxes.set(id, { group, pipe, ev });
+    }
+  });
 
-  // matter: born at the plate when its line runs; once an observation
-  // happened after its birth, it has flowed through the ring and parks
-  const firstOutputAfter = (lineIdx) => {
-    const out = events.find((e) => e.kind === 'output');
-    return out !== undefined && out.i > lineIdx ? out : null;
-  };
+  // matter: balls born at their line's pipe; once an output happened
+  // after their birth, they have flowed into the box and rest inside
   let slot = 0;
   const seen = new Set();
   for (const ev of events) {
@@ -303,30 +216,32 @@ function applyFrame(f) {
       slot++;
       if (seen.has(id)) continue;
       seen.add(id);
-      const entry = materialize(id, fact, slot - 1, ev.line);
-      const observed = firstOutputAfter(events.indexOf(ev));
-      const base = observed ? STAGE.parked : STAGE.born;
+      const index = executed.findIndex((e) => e.line === ev.line);
+      const x = boxX(index);
+      const entry = materialize(id, fact, ev.line, x);
+      const observed = events.find((e) => e.kind === 'output');
       entry.targetPos = new THREE.Vector3(
-        base.x, base.y + (slot - 1 > 2 ? (slot - 3) * 2 : 0), base.z);
+        x + (observed ? 0 : 0), observed ? 12 : 24.5, observed ? 0 : 0);
+      entry.inside = !!observed;
     }
   }
 
   // observation: everything printed so far, on the screen
-  const observed = events.filter((e) => e.kind === 'output')
+  const observedText = events.filter((e) => e.kind === 'output')
     .map((e) => e.text).join('');
-  state.screen.userData.textPlane.material.map = screenTexture(observed);
-  state.screen.userData.face.material.color.setHex(observed ? 0x0b2018 : 0x0b1013);
+  state.screen.userData.textPlane.material.map = screenTexture(observedText);
+  state.screen.userData.face.material.color.setHex(observedText ? 0x0b2018 : 0x0b1013);
 }
 
-function materialize(id, fact, slotIndex, line) {
-  if (state.shapes.has(id)) return state.shapes.get(id);
-  const group = fact.type === 'str' ? buildHelix(fact) : buildOrb(fact);
-  group.position.set(STAGE.born.x, STAGE.born.y, STAGE.born.z);
+function materialize(id, fact, line, x) {
+  if (state.matter.has(id)) return state.matter.get(id);
+  const group = buildBall(fact);
+  group.position.set(x, 24.5, 0);
   scene.add(group);
   const entry = { group, kind: 'matter', fact, line,
-    targetPos: new THREE.Vector3(STAGE.born.x, STAGE.born.y, STAGE.born.z) };
+    targetPos: new THREE.Vector3(x, 24.5, 0), inside: false };
   group.traverse((o) => { o.userData.pick = entry; });
-  state.shapes.set(id, entry);
+  state.matter.set(id, entry);
   state.pickables.push(group);
   entry.group.scale.setScalar(0.01);
   entry.born = performance.now();
@@ -344,10 +259,19 @@ function setFrame(f, { pulses = false } = {}) {
   const ev = state.tape.events[f];
   cap.innerHTML = ev ? eventCaption(ev) : '&nbsp;';
   if (pulses && ev) {
+    const now = performance.now();
+    if (ev.kind === 'line') {
+      // the working box lights up while its matter drops in
+      const box = state.boxes.get(ev.line);
+      if (box) {
+        box.group.userData.body.material.emissive.setHex(0x2d8f5f);
+        box.group.userData.working = now + 1500;
+        box.pipe.until = now + 2200;
+      }
+    }
     if (ev.kind === 'output') {
-      state.beam.visible = true;
-      state.beam.userData.until = performance.now() + 1800;
-      state.wire.userData.until = performance.now() + 1800;
+      state.cone.visible = true;
+      state.cone.userData.until = now + 1800;
     }
   }
 }
@@ -371,9 +295,8 @@ function hoverName(entry) {
   switch (entry.kind) {
     case 'matter': return entry.fact.repr || entry.fact.type;
     case 'screen': return 'stdout';
-    case 'observer': return 'print';
-    case 'plate': return 'the running code';
-    case 'bench': return state.tape.program;
+    case 'box': return `line ${entry.line}`;
+    case 'floor': return state.tape.program;
     default: return '?';
   }
 }
@@ -382,9 +305,8 @@ function hoverKind(entry) {
   switch (entry.kind) {
     case 'matter': return entry.fact.type;
     case 'screen': return 'output of print';
-    case 'observer': return 'builtin function';
-    case 'plate': return 'statement';
-    case 'bench': return 'module';
+    case 'box': return 'statement';
+    case 'floor': return 'module';
     default: return '';
   }
 }
@@ -419,25 +341,15 @@ function renderPanel(entry) {
       everything print() writes lands here, in order, as a copy — the
       printed values themselves are never changed.</div>
       <div class="fact">${esc(observed || '(nothing printed yet at this frame)')}</div>`;
-  } else if (entry.kind === 'observer') {
-    html = `
-      <div class="kind">builtin function</div>
-      <h2>print</h2>
-      <div class="desc">print(...) writes its arguments to stdout as
-      text, then returns None.</div>
-      <div class="fact">print(*objects, sep=' ', end='\\n', file=None, flush=False)</div>`;
-  } else if (entry.kind === 'plate') {
-    const lines = state.tape.events.slice(0, state.frame + 1)
-      .filter((e) => e.kind === 'line');
-    const last = lines[lines.length - 1];
+  } else if (entry.kind === 'box') {
     html = `
       <div class="kind">statement</div>
-      <h2>the running code</h2>
+      <h2>line ${entry.line}</h2>
       <div class="desc">Python runs a file top to bottom, one line at a
-      time; this is the line it reached at this frame. Values are born at
-      the line that creates them.</div>
-      <div class="fact">${last ? `line ${last.line}: ${esc(last.code)}` : '(no line has run yet at this frame)'}</div>`;
-  } else if (entry.kind === 'bench') {
+      time; each line is a box in the room, in reading order. Values are
+      born inside the box of the line that creates them.</div>
+      <div class="fact">${esc(entry.code)}</div>`;
+  } else if (entry.kind === 'floor') {
     const endEv = state.tape.events.find((e) => e.kind === 'end');
     html = `
       <div class="kind">module</div>
@@ -472,7 +384,7 @@ async function main() {
   document.body.appendChild(renderer.domElement);
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#0d1418');
-  scene.fog = new THREE.Fog(0x0d1418, 300, 900);
+  scene.fog = new THREE.Fog(0x0d1418, 320, 950);
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
   state.camera = camera;
   scene.add(new THREE.AmbientLight(0xffffff, 0.85));
@@ -480,39 +392,35 @@ async function main() {
   key.position.set(60, 90, 40);
   scene.add(key);
 
-  const floor = new THREE.GridHelper(600, 60, 0x23323a, 0x17222a);
-  floor.position.y = -30;
+  // the room: the floor is the module; boxes (lines) arrive with the tape
+  const floor = new THREE.Mesh(
+    new THREE.CylinderGeometry(120, 120, 2, 64),
+    new THREE.MeshLambertMaterial({ color: 0x121a20 }));
+  floor.position.y = -1;
   scene.add(floor);
+  const grid = new THREE.GridHelper(600, 60, 0x23323a, 0x17222a);
+  grid.position.y = -10;
+  scene.add(grid);
+  state.floor = floor;
+  floor.userData.pick = { kind: 'floor' };
+  state.pickables.push(floor);
 
-  // the story, left to right: plate -> born -> ring -> parked -> screen
-  state.bench = buildBench();
-  scene.add(state.bench);
-  state.bench.traverse((o) => { o.userData.pick = { kind: 'bench' }; });
-  state.pickables.push(state.bench);
-
-  state.codePlate = buildCodePlate();
-  scene.add(state.codePlate);
-  state.codePlate.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'plate' }; });
-  state.pickables.push(state.codePlate);
-
-  state.observer = buildObserver();
-  scene.add(state.observer);
-  state.observer.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'observer' }; });
-  state.pickables.push(state.observer);
-
-  state.wire = buildWire();
-  scene.add(state.wire);
-
+  // stdout, standing where the whole room can see it
   state.screen = buildScreen();
   scene.add(state.screen);
   state.screen.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
   state.pickables.push(state.screen);
 
-  state.beam = buildBeam();
-  scene.add(state.beam);
+  // the projection cone is built once the first box exists (box 0's
+  // front face is the print mouth); rebuilt per frame count is fine at
+  // lesson scale, so build lazily in applyFrame via cone creation
+  state.cone = buildCone(
+    new THREE.Vector3(boxX(0) + 13.5, 12, 0),
+    new THREE.Vector3(20, 26, -33));
+  scene.add(state.cone);
 
   // navigation: orbit, pan, zoom
-  const target = new THREE.Vector3(0, 8, 0);
+  const target = new THREE.Vector3(-20, 10, 0);
   state.target = target;
   const dom = renderer.domElement;
   dom.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -550,8 +458,7 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // picking: click anything to inspect it at this exact frame; hover
-  // names it - identity comes from the tooltip, not floating billboards
+  // hover names things; click inspects them at this exact frame
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const tooltip = document.getElementById('tooltip');
@@ -573,7 +480,6 @@ async function main() {
       dom.style.cursor = 'grab';
     }
   });
-
   dom.addEventListener('click', (e) => {
     if (state.drag && state.drag.moved > 6) return;
     ndc.set((e.clientX / window.innerWidth) * 2 - 1,
@@ -618,8 +524,8 @@ async function main() {
 
   setFrame(0);
 
-  // animation loop: eased flight, matter growing and gliding to its
-  // fold position (scrub-safe: the target is always fold-derived)
+  // animation loop: matter eases toward its fold-derived position, the
+  // working box glows, pipes and cone fade after their windows
   const frame = () => {
     const now = performance.now();
     if (state.flyTo) {
@@ -628,21 +534,33 @@ async function main() {
       state.dist += (goal.dist - state.dist) * 0.08;
       if (target.distanceTo(goal) < 0.5) state.flyTo = null;
     }
-    for (const entry of state.shapes.values()) {
+    for (const entry of state.matter.values()) {
       if (entry.born !== undefined) {
         const age = now - entry.born;
         const s = Math.min(1, age / 700);
         entry.group.scale.setScalar(0.01 + 0.99 * (1 - Math.pow(1 - s, 3)));
         if (s >= 1) delete entry.born;
       }
-      entry.group.position.lerp(entry.targetPos, 0.06);
+      entry.group.position.lerp(entry.targetPos, 0.07);
+      entry.group.userData.ball.material.opacity = 1;
+      entry.group.userData.ball.material.transparent =
+        entry.group.userData.ball.material.transparent || false;
+      entry.group.userData.ball.material.emissive.setHex(
+        entry.inside ? 0x0d1418 : 0x14222a);
     }
-    if (state.beam.visible && state.beam.userData.until
-        && now > state.beam.userData.until) {
-      state.beam.visible = false;
+    for (const box of state.boxes.values()) {
+      const body = box.group.userData.body;
+      if (!box.group.userData.working || now > box.group.userData.working) {
+        body.material.emissive.setHex(0x0a1014);
+      }
     }
-    state.wire.material.opacity =
-      (state.wire.userData.until && now < state.wire.userData.until) ? 0.9 : 0.22;
+    for (const p of state.pipes) {
+      p.mesh.material.opacity = (now < p.until) ? 0.5 : 0.12;
+    }
+    if (state.cone.visible && state.cone.userData.until
+        && now > state.cone.userData.until) {
+      state.cone.visible = false;
+    }
     camera.position.set(
       target.x + state.dist * Math.sin(state.phi) * Math.cos(state.theta),
       target.y + state.dist * Math.cos(state.phi),
