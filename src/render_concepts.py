@@ -59,7 +59,9 @@ def main():
     out.append("  `shape`. Every other column is a controlled term.")
     out.append("- `possible_inputs` / `possible_outputs` are semicolon-separated")
     out.append("  concept ids: what can be plugged into this concept, and")
-    out.append("  what comes out. The pluggability columns ARE the graph.")
+    out.append("  what comes out. The pluggability columns are the flow")
+    out.append("  graph; `contains` is the structure graph - what can be")
+    out.append("  part of what.")
     out.append("- `status` is `draft` until the user ratifies it. Panels may")
     out.append("  quote only `agreed` definitions verbatim; no shape may be")
     out.append("  built for a concept that is not `agreed`.")
@@ -91,8 +93,9 @@ def main():
         out.append(f"## {area.capitalize()}")
         out.append("")
         out.append("| Id | Concept | Definition | Example | "
-                   "Possible inputs | Possible outputs | Shape | Status |")
-        out.append("|---|---|---|---|---|---|---|---|")
+                   "Possible inputs | Possible outputs | Contains | "
+                   "Shape | Status |")
+        out.append("|---|---|---|---|---|---|---|---|---|")
         for c in rows:
             out.append(
                 f"| `{c['id']}` | {md_escape(c['concept'])} "
@@ -100,6 +103,7 @@ def main():
                 f"| `{md_escape(c['example'])}` "
                 f"| {md_escape(c['possible_inputs'])} "
                 f"| {md_escape(c['possible_outputs'])} "
+                f"| {md_escape(c['contains'])} "
                 f"| {md_escape(c['shape'])} "
                 f"| {c['status']} |")
         out.append("")

@@ -25,11 +25,11 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 
 CONCEPT_COLUMNS = ["id", "area", "concept", "definition", "example",
-                   "possible_inputs", "possible_outputs", "shape", "status"]
+                   "possible_inputs", "possible_outputs", "contains", "shape", "status"]
 RELATION_COLUMNS = ["id", "relation", "definition", "example", "status"]
 AREAS = {
     "program structure", "values and types", "variables", "output",
-    "functions", "control flow", "collections", "errors", "files",
+    "input", "functions", "control flow", "collections", "errors", "files",
     "modules", "objects",
 }
 STATUSES = {"draft", "agreed"}
@@ -73,7 +73,7 @@ def main():
             fail(errors, f"{cid}: area {row['area']!r} not in the fixed vocabulary")
         if row["status"] not in STATUSES:
             fail(errors, f"{cid}: status {row['status']!r} must be draft or agreed")
-        for col in ("possible_inputs", "possible_outputs"):
+        for col in ("possible_inputs", "possible_outputs", "contains"):
             for ref in (t.strip() for t in row[col].split(";") if t.strip()):
                 if ref not in ids and ref not in {r["id"] for r in relations}:
                     # ids are being built as we go; recheck at the end
@@ -83,7 +83,7 @@ def main():
 
     # recheck references now that all ids are known
     for row in concepts:
-        for col in ("possible_inputs", "possible_outputs"):
+        for col in ("possible_inputs", "possible_outputs", "contains"):
             for ref in (t.strip() for t in row[col].split(";") if t.strip()):
                 if ref not in ids:
                     fail(errors, f"{row['id']}: {col} references {ref!r}, "
