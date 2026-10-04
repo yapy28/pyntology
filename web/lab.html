@@ -46,11 +46,11 @@
     display: flex; align-items: center; gap: 12px;
     padding: 10px 16px; background: var(--panel); border-top: 1px solid var(--line);
   }
-  #play {
+  #play, #reset {
     background: #101c22; color: var(--accent); border: 1px solid var(--line);
     border-radius: 6px; padding: 7px 16px; cursor: pointer; font-size: 13px; font-weight: 600;
   }
-  #play:hover { border-color: var(--accent); }
+  #play:hover, #reset:hover { border-color: var(--accent); }
   #scrub { flex: 1; accent-color: var(--accent); cursor: pointer; }
   #counter { color: var(--muted); font-size: 12px; min-width: 72px; text-align: right; }
   #hint {
@@ -75,6 +75,7 @@
 <div id="caption">&nbsp;</div>
 <div id="timeline">
   <button id="play" type="button">Play</button>
+  <button id="reset" type="button">Reset</button>
   <input id="scrub" type="range" min="0" max="0" value="0" step="1">
   <div id="counter">0 / 0</div>
 </div>

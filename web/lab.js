@@ -193,7 +193,8 @@ function eventCaption(ev) {
 function applyFrame(f) {
   const events = state.tape.events.slice(0, f + 1);
 
-  // boxes: one per executed line, in reading order
+  // boxes: one per executed line, in reading order; rewinding before a
+  // line's execution hides its box, pipe and lens again
   const executed = [];
   const seenLines = new Set();
   for (const ev of events) {
@@ -221,6 +222,12 @@ function applyFrame(f) {
       state.boxes.set(id, { group, pipe, lens, ev });
     }
   });
+  for (const [line, box] of state.boxes) {
+    const vis = seenLines.has(line);
+    box.group.visible = vis;
+    box.pipe.visible = vis;
+    box.lens.visible = vis;
+  }
 
   // matter: balls born above their line's lens; once an output happened
   // after their birth, they have dropped THROUGH the lens (observed,
@@ -354,6 +361,22 @@ async function playLoop() {
   }
   state.playing = false;
   btn.textContent = 'Play';
+}
+
+function resetRun() {
+  state.playing = false;
+  document.getElementById('play').textContent = 'Play';
+  // kill every transient effect: no sweep, no ghosts, no cone, no glow
+  state.scan.t0 = -1e9;
+  state.scan.mesh.visible = false;
+  for (const g of state.ghosts) {
+    scene.remove(g.mesh);
+    g.mesh.material.dispose();
+  }
+  state.ghosts.length = 0;
+  state.cone.visible = false;
+  for (const p of state.pipes) p.until = 0;
+  setFrame(0);
 }
 
 // ---- inspector ---------------------------------------------------------
@@ -605,8 +628,12 @@ async function main() {
       playLoop();
     }
   });
+  // reset: a pristine experiment - frame 0, no transient effects, so
+  // nothing from a previous run lingers or rematerializes
+  document.getElementById('reset').addEventListener('click', resetRun);
   window.addEventListener('keydown', (e) => {
-    if (e.key === ' ') { e.preventDefault(); document.getElementById('play').click(); }
+    if (e.key === ' ' ) { e.preventDefault(); document.getElementById('play').click(); }
+    if (e.key === 'r' || e.key === 'R') resetRun();
     if (e.key === 'Escape') document.getElementById('panel').classList.remove('visible');
     if (e.key === 'ArrowRight') scrub.value = Math.min(tape.events.length - 1, state.frame + 1);
     if (e.key === 'ArrowLeft') scrub.value = Math.max(0, state.frame - 1);
