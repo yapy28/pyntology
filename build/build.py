@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Build the colibri visualization payload from the RDF graph.
+"""Build the pyntology visualization payload from the RDF graph.
 
-By default loads the colibri vocabulary and every ontology file dropped
-into data/ontologies/ (.ttl, .owl, .rdf, .nt, .n3, .jsonld). With
---with-collibra it also loads the transcribed Collibra operating model
-(tmp/ootb-metamodel.ttl). Generic OWL/SKOS mapping:
+Loads the Python ontology vocabulary and every ontology file dropped
+into data/ontologies/ (.ttl, .owl, .rdf, .nt, .n3, .jsonld). Generic
+OWL/SKOS mapping:
 
   owl:Ontology / owl:Class / owl:ObjectProperty / owl:DatatypeProperty /
   owl:AnnotationProperty / skos:ConceptScheme / skos:Concept  -> nodes
@@ -250,11 +249,6 @@ def load_ontologies(g: Graph):
     for f in sorted(ONTO_DIR.iterdir()):
         if f.suffix.lower() not in FORMATS or f.name.startswith("."):
             continue
-        if f.name == "ootb-metamodel.ttl":
-            print(f"  skipping {f.name}: the Collibra metamodel belongs in "
-                  f"data/, not in the drop zone (use --with-collibra to "
-                  f"include it)")
-            continue
         gf = Graph()
         gf.parse(str(f), format=FORMATS[f.suffix.lower()])
         onto_iris = [str(s) for s in gf.subjects(RDF.type, OWL.Ontology)]
@@ -300,13 +294,6 @@ def run_shacl(g: Graph):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--with-collibra", action="store_true",
-                    help="also load the Collibra operating model "
-                         "(tmp/ootb-metamodel.ttl); by default only the "
-                         "files in data/ontologies/ are loaded")
-    # kept for backward compatibility; ontologies-only is now the default
-    ap.add_argument("--ontologies-only", action="store_true",
-                    help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     g = Graph()
@@ -318,12 +305,9 @@ def main():
         if ontos:
             vocab_ontos.append((vf.stem, ontos))
         g += vg
-    if args.with_collibra:
-        g.parse(str(ROOT / "tmp" / "ootb-metamodel.ttl"), format="turtle")
     loaded, defined_by, file_ontos = load_ontologies(g)
     violations = run_shacl(g)
-    print("mode:", "Collibra operating model + ontologies" if args.with_collibra
-          else "ontologies only")
+    print("mode: ontologies only")
 
     pvals = {}
     for row in g.query(PV_QUERY):

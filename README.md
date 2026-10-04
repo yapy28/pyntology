@@ -79,5 +79,4 @@ makes the whole thing usable anywhere.
 | File | Contents |
 |------|----------|
 | [docs/shapes.md](docs/shapes.md) | The shape language: entry contract, every shape, why it is what it is |
-| [DESIGN.md](DESIGN.md) | Settled decisions, scope, open homework |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | How the pieces fit |
+| [DESIGN.md](DESIGN.md) | Settled decisions, hard rules, open work, parking lot |

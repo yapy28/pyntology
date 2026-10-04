@@ -4,15 +4,8 @@ data/ontologies/*
 !data/ontologies/python-conditions.ttl
 !data/ontologies/python-shacl.ttl
 
-# user's moved ontology collections and scratch inputs
-data/onto3ik/
-data/onto2/
-
 # test subject python files (extracted into the drop zone instead)
 /categorize_violations.py
-
-# fetched documentation snapshots (refetch with: python sources/fetch_sources.py)
-sources/raw/
 
 # generated artifacts
 data/flow/
@@ -21,15 +14,12 @@ web/file-graph.json
 reports/
 dist/
 
-# anonymization map: contains real names, never commit it
-tools/anonymize-map.json
-
 # python
 .venv/
 __pycache__/
 *.pyc
 
-# local scratch: Collibra OOTB metamodel and anything else parked
+# local scratch
 tmp/
 
 # misc
