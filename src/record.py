@@ -155,8 +155,18 @@ def record(path: Path):
             return tracer
         return tracer
 
+    def wrapped_print(*args, sep=' ', end='\n', file=None, flush=False):
+        # the tape must know that print is a function that was called:
+        # its arguments in, its return value out
+        emit("call_enter", func="print",
+             args=[cap_value(a) for a in args])
+        stdout_buf.write(sep.join(str(a) for a in args) + end)
+        flush_output()
+        emit("call_return", func="print", value=cap_value(None))
+
     code = compile(source, str(path), "exec")
     g = {"__name__": "__main__", "__builtins__": __builtins__}
+    g["print"] = wrapped_print
 
     emit("start")
     old_trace, old_out = sys.gettrace(), sys.stdout

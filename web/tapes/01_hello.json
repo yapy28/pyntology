@@ -31,11 +31,33 @@
   },
   {
    "i": 3,
+   "kind": "call_enter",
+   "func": "print",
+   "args": [
+    {
+     "type": "str",
+     "text": "Hello, world!",
+     "len": 13,
+     "repr": "'Hello, world!'"
+    }
+   ]
+  },
+  {
+   "i": 4,
    "kind": "output",
    "text": "Hello, world!\n"
   },
   {
-   "i": 4,
+   "i": 5,
+   "kind": "call_return",
+   "func": "print",
+   "value": {
+    "type": "NoneType",
+    "repr": "None"
+   }
+  },
+  {
+   "i": 6,
    "kind": "call_return",
    "func": "<module>",
    "value": {
@@ -44,7 +66,7 @@
    }
   },
   {
-   "i": 5,
+   "i": 7,
    "kind": "end",
    "code": 0
   }

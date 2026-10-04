@@ -23,12 +23,13 @@ const FLOW = '#5cf1b4';
 
 const state = {
   tape: null, frame: -1, playing: false,
-  boxes: new Map(),        // line -> {group, pipe, lens, ev}
+  boxes: new Map(),        // line -> {group, ev}
+  chambers: new Map(),     // func -> the function machine that was called
   matter: new Map(),       // id -> {group, kind: 'matter', fact, line, targetPos}
-  pipes: [],               // {mesh, until}
   cone: null, wall: null, wallLines: 0, floor: null,
   scan: null,              // the beam sweep: {mesh, t0, x}
   ghosts: [],               // after-images proving no mutation: {mesh, t0}
+  wisps: [],                // return values flowing out: {mesh, t0, x}
   pickables: [],
   camera: null, target: null, dist: 170, theta: 0.7, phi: 1.15,
   flyTo: null, drag: null,
@@ -91,28 +92,32 @@ function buildBall(fact) {
   return group;
 }
 
-function buildIntakePipe(x) {
-  // the channel: matter drops from its birth point, through the
-  // observation lens, into the box below
-  const geo = new THREE.CylinderGeometry(2.0, 2.0, 12, 14, 1, true);
-  const pipe = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    color: FLOW, transparent: true, opacity: 0.12,
-    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
-  }));
-  pipe.position.set(x, 19, 0);
-  return pipe;
-}
-
-function buildLens(x) {
-  // print's observation lens: a donut aperture on the intake channel.
-  // Matter passes THROUGH it; the beam sweeps, the readout projects to
-  // the wall; what exits is exactly what entered. Nothing comes back.
-  const lens = new THREE.Mesh(
-    new THREE.TorusGeometry(3.9, 0.7, 14, 40),
+function buildChamber(x, func) {
+  // a function is a machine you call: a glass chamber with an argument
+  // aperture on top and a return exhaust at the bottom. Matter goes in,
+  // the machine works, what it returns comes out - for print that is
+  // None, a gray wisp. The statement box is the code; the chamber is
+  // the function itself, docking above the line that calls it.
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(3.2, 3.2, 9, 20, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x27404d, transparent: true,
+      opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
+  group.add(body);
+  const aperture = new THREE.Mesh(
+    new THREE.TorusGeometry(3.7, 0.7, 14, 40),
     new THREE.MeshLambertMaterial({ color: '#9fb8c4', emissive: 0x1c2830 }));
-  lens.rotation.x = Math.PI / 2;
-  lens.position.set(x, 19, 0);
-  return lens;
+  aperture.rotation.x = Math.PI / 2;
+  aperture.position.y = 4.5;
+  group.add(aperture);
+  const exhaust = new THREE.Mesh(
+    new THREE.TorusGeometry(2.2, 0.45, 12, 32),
+    new THREE.MeshLambertMaterial({ color: 0x3a4a52 }));
+  exhaust.rotation.x = Math.PI / 2;
+  exhaust.position.y = -4.5;
+  group.add(exhaust);
+  group.position.set(x, 20, 0);
+  return { group, body, aperture, exhaust, func, x, until: 0, scanning: 0 };
 }
 
 function buildCone(from, to) {
@@ -176,10 +181,11 @@ function eventCaption(ev) {
     case 'end': return `the program ends — exit code ${ev.code}`;
     case 'call_enter':
       return ev.func === '<module>' ? 'the module loads'
-        : `machine ${ev.func} starts`;
+        : `${ev.func} is called${ev.args?.length
+          ? ` with ${(ev.args || []).map((a) => a.repr).join(', ')}` : ''}`;
     case 'call_return':
       return ev.func === '<module>' ? 'the module finishes'
-        : `${ev.func} returns ${ev.value?.repr ?? ''}`;
+        : `${ev.func} returns ${ev.value?.repr ?? 'None'}`;
     case 'line': return `line ${ev.line}: <code>${ev.code || ''}</code>`;
     case 'assign':
       return `${ev.name} = ${ev.value?.repr ?? ''}  (bound in ${ev.scope})`;
@@ -194,7 +200,7 @@ function applyFrame(f) {
   const events = state.tape.events.slice(0, f + 1);
 
   // boxes: one per executed line, in reading order; rewinding before a
-  // line's execution hides its box, pipe and lens again
+  // line's execution hides its box again
   const executed = [];
   const seenLines = new Set();
   for (const ev of events) {
@@ -209,30 +215,40 @@ function applyFrame(f) {
       const group = buildLineBox(index, ev.line, ev.code);
       group.userData.face.material.map = codeTexture(ev.line, ev.code);
       scene.add(group);
-      const pipe = buildIntakePipe(boxX(index));
-      scene.add(pipe);
-      state.pipes.push({ mesh: pipe, until: 0 });
-      const lens = buildLens(boxX(index));
-      scene.add(lens);
       group.userData.pick = { kind: 'box', line: ev.line, code: ev.code };
       group.traverse((o) => { o.userData.pick = o.userData.pick || group.userData.pick; });
       state.pickables.push(group);
-      lens.userData.pick = { kind: 'lens' };
-      state.pickables.push(lens);
-      state.boxes.set(id, { group, pipe, lens, ev });
+      state.boxes.set(id, { group, ev });
     }
   });
   for (const [line, box] of state.boxes) {
-    const vis = seenLines.has(line);
-    box.group.visible = vis;
-    box.pipe.visible = vis;
-    box.lens.visible = vis;
+    box.group.visible = seenLines.has(line);
   }
 
-  // matter: balls born above their line's lens; once an output happened
-  // after their birth, they have dropped THROUGH the lens (observed,
-  // unchanged) and rest in the box below. Rewinding before their line
-  // un-births them (the fold is the only truth)
+  // chambers: a function machine docks above the line that calls it;
+  // one chamber per function, however many times it is called
+  const calledFuncs = new Set();
+  for (const ev of events) {
+    if (ev.kind !== 'call_enter' || ev.func === '<module>') continue;
+    calledFuncs.add(ev.func);
+    if (state.chambers.has(ev.func)) continue;
+    const callerLine = [...events.slice(0, ev.i)].reverse()
+      .find((e) => e.kind === 'line');
+    const index = executed.findIndex((e) => e.line === callerLine?.line);
+    const chamber = buildChamber(boxX(index < 0 ? 0 : index), ev.func);
+    chamber.group.traverse((o) => {
+      o.userData.pick = o.userData.pick || { kind: 'chamber', func: ev.func };
+    });
+    scene.add(chamber.group);
+    state.pickables.push(chamber.group);
+    state.chambers.set(ev.func, chamber);
+  }
+  for (const [func, chamber] of state.chambers) {
+    chamber.group.visible = calledFuncs.has(func);
+  }
+
+  // matter: balls born above the aperture of the chamber their line
+  // calls; once observed, they rest inside the chamber, unchanged
   let slot = 0;
   const seen = new Set();
   for (const ev of events) {
@@ -246,11 +262,17 @@ function applyFrame(f) {
       const x = boxX(index);
       const entry = materialize(id, fact, ev.line, x);
       const observed = events.find((e) => e.kind === 'output');
-      entry.targetPos = new THREE.Vector3(x, observed ? 12.5 : 25.5, 0);
+      entry.targetPos = new THREE.Vector3(x, observed ? 20 : 29, 0);
     }
   }
   for (const [id, entry] of state.matter) {
-    entry.group.visible = seen.has(id);
+    const vis = seen.has(id);
+    // re-birth snaps: nothing ever eases out of a box it previously
+    // rested in - becoming visible again places matter at its fold spot
+    if (vis && !entry.group.visible) {
+      entry.group.position.copy(entry.targetPos);
+    }
+    entry.group.visible = vis;
   }
 
   // observation: every output event adds a physical line to the wall;
@@ -271,10 +293,10 @@ function applyFrame(f) {
 function materialize(id, fact, line, x) {
   if (state.matter.has(id)) return state.matter.get(id);
   const group = buildBall(fact);
-  group.position.set(x, 25.5, 0);
+  group.position.set(x, 29, 0);
   scene.add(group);
   const entry = { group, kind: 'matter', fact, line,
-    targetPos: new THREE.Vector3(x, 25.5, 0) };
+    targetPos: new THREE.Vector3(x, 29, 0) };
   group.traverse((o) => { o.userData.pick = entry; });
   state.matter.set(id, entry);
   state.pickables.push(group);
@@ -310,29 +332,31 @@ function setFrame(f, { pulses = false } = {}) {
         box.group.userData.working = now + 1500;
       }
     }
+    if (ev.kind === 'call_enter' && ev.func !== '<module>') {
+      // the function machine docks, alive
+      const chamber = state.chambers.get(ev.func);
+      if (chamber) {
+        chamber.group.scale.setScalar(0.01);
+        chamber.born = now;
+        chamber.until = now + 2000;
+      }
+    }
     if (ev.kind === 'output') {
-      // matter drops through the lens: the beam sweeps over it, the
-      // readout projects to the wall, and an after-image stays at the
-      // aperture to prove what went in equals what came out
+      // matter drops through the aperture: the beam sweeps over it,
+      // the readout projects to the wall, the ball rests unchanged
       state.cone.visible = true;
       state.cone.userData.until = now + 1800;
-      const lineEv = [...state.tape.events.slice(0, ev.i)]
-        .reverse().find((e) => e.kind === 'line');
-      const box = lineEv ? state.boxes.get(lineEv.line) : null;
-      const x = box ? boxX([...state.boxes.keys()].indexOf(lineEv.line)) : boxX(0);
-      for (const b of state.boxes.values()) {
-        b.pipe.until = now + 2200;
-        b.lens.userData.scanning = now + 1600;
+      const chamber = [...state.chambers.values()]
+        .find((c) => c.group.visible);
+      if (chamber) {
+        state.scan.t0 = now;
+        state.scan.x = chamber.x;
+        chamber.scanning = now + 1600;
       }
-      // the sweep: a scanner ring travels down the channel, crossing
-      // the falling matter once
-      state.scan.t0 = now;
-      state.scan.x = x;
       // the identity ghost: a translucent copy of the observed matter
-      // pinned at the aperture plane, fading - same color, same size,
-      // no mutation
+      // pinned at the aperture, fading - what went in = what came out
       for (const entry of state.matter.values()) {
-        if (entry.observed) continue;
+        if (entry.observed || !entry.group.visible) continue;
         entry.observed = true;
         const ghost = new THREE.Mesh(
           entry.group.children[0].geometry,
@@ -340,11 +364,28 @@ function setFrame(f, { pulses = false } = {}) {
             color: TYPE_COLORS[entry.fact.type] || TYPE_COLORS.unknown,
             transparent: true, opacity: 0.4, depthWrite: false,
           }));
-        ghost.position.set(x, 19, 0);
+        ghost.position.set(entry.targetPos.x, 24.5, 0);
         ghost.raycast = () => {};
         scene.add(ghost);
         state.ghosts.push({ mesh: ghost, t0: now });
         break;
+      }
+    }
+    if (ev.kind === 'call_return' && ev.func !== '<module>') {
+      // what the function returns flows out of the exhaust: for print
+      // that is None - a gray wisp that falls and dissolves
+      const chamber = state.chambers.get(ev.func);
+      if (chamber) {
+        const wisp = new THREE.Mesh(
+          new THREE.SphereGeometry(1.2, 12, 10),
+          new THREE.MeshBasicMaterial({
+            color: TYPE_COLORS.NoneType, transparent: true, opacity: 0.8,
+            depthWrite: false,
+          }));
+        wisp.position.set(chamber.x, 15.5, 0);
+        wisp.raycast = () => {};
+        scene.add(wisp);
+        state.wisps.push({ mesh: wisp, t0: now, x: chamber.x });
       }
     }
   }
@@ -366,7 +407,8 @@ async function playLoop() {
 function resetRun() {
   state.playing = false;
   document.getElementById('play').textContent = 'Play';
-  // kill every transient effect: no sweep, no ghosts, no cone, no glow
+  // kill every transient effect: no sweep, no ghosts, no wisps, no cone,
+  // no chamber glow
   state.scan.t0 = -1e9;
   state.scan.mesh.visible = false;
   for (const g of state.ghosts) {
@@ -374,8 +416,16 @@ function resetRun() {
     g.mesh.material.dispose();
   }
   state.ghosts.length = 0;
+  for (const w of state.wisps) {
+    scene.remove(w.mesh);
+    w.mesh.material.dispose();
+  }
+  state.wisps.length = 0;
   state.cone.visible = false;
-  for (const p of state.pipes) p.until = 0;
+  for (const chamber of state.chambers.values()) {
+    chamber.until = 0;
+    chamber.scanning = 0;
+  }
   setFrame(0);
 }
 
@@ -385,7 +435,7 @@ function hoverName(entry) {
   switch (entry.kind) {
     case 'matter': return entry.fact.repr || entry.fact.type;
     case 'screen': return 'stdout';
-    case 'lens': return 'print';
+    case 'chamber': return entry.func;
     case 'box': return `line ${entry.line}`;
     case 'floor': return state.tape.program;
     default: return '?';
@@ -396,7 +446,7 @@ function hoverKind(entry) {
   switch (entry.kind) {
     case 'matter': return entry.fact.type;
     case 'screen': return 'output of print';
-    case 'lens': return 'builtin function · observes, never transforms';
+    case 'chamber': return 'builtin function';
     case 'box': return 'statement';
     case 'floor': return 'module';
     default: return '';
@@ -435,17 +485,22 @@ function renderPanel(entry) {
       is <code>str(value)</code>, the value's string representation,
       not the value itself.</div>
       <div class="fact">lines on the wall at this frame: ${observed.length}</div>`;
-  } else if (entry.kind === 'lens') {
-    const observed = state.tape.events.slice(0, state.frame + 1)
-      .filter((e) => e.kind === 'output');
+  } else if (entry.kind === 'chamber') {
+    const calls = state.tape.events.slice(0, state.frame + 1)
+      .filter((e) => e.kind === 'call_enter' && e.func === entry.func);
+    const rets = state.tape.events.slice(0, state.frame + 1)
+      .filter((e) => e.kind === 'call_return' && e.func === entry.func);
     html = `
       <div class="kind">builtin function</div>
-      <h2>print</h2>
-      <div class="desc">Matter passes through the lens; the beam sweeps
-      it and projects <code>str(value)</code> onto the wall. What exits
-      is exactly what entered — print never transforms, and it returns
+      <h2>${esc(entry.func)}</h2>
+      <div class="desc">A function is a machine you call: matter goes in
+      through the aperture, the machine does its work, and what it
+      returns comes out of the exhaust. print's work is projecting text
+      to the wall - it never transforms its argument, and it returns
       None: nothing comes back to you.</div>
-      <div class="fact">in this run: observed ${observed.length} time${observed.length === 1 ? '' : 's'}</div>`;
+      <div class="fact">in this run so far: called ${calls.length} time${calls.length === 1 ? '' : 's'}${calls.length
+        ? `, with ${(calls[calls.length - 1].args || []).map((a) => a.repr).join(', ')}`
+        : ''}${rets.length ? `\nreturned: ${rets[0].value?.repr ?? 'None'}` : ''}</div>`;
   } else if (entry.kind === 'box') {
     html = `
       <div class="kind">statement</div>
@@ -517,7 +572,7 @@ async function main() {
   state.wall.traverse((o) => { o.userData.pick = o.userData.pick || { kind: 'screen' }; });
   state.pickables.push(state.wall);
 
-  // the projection cone: from the observation lens to the wall's
+  // the projection cone: from the function chamber to the wall's
   // current line
   state.cone = buildCone(
     new THREE.Vector3(boxX(0), 19, 0),
@@ -672,20 +727,14 @@ async function main() {
       if (!box.group.userData.working || now > box.group.userData.working) {
         body.material.emissive.setHex(0x0a1014);
       }
-      box.lens.material.emissive.setHex(
-        box.lens.userData.scanning && now < box.lens.userData.scanning
-          ? 0x2d8f5f : 0x1c2830);
     }
-    for (const p of state.pipes) {
-      p.mesh.material.opacity = (now < p.until) ? 0.5 : 0.12;
-    }
-    // the beam sweep: the scanner ring travels down the channel over
-    // ~0.9s, bright at the crossings, gone when it exits
+    // the beam sweep: the scanner ring travels down through the
+    // chamber over ~0.9s, bright at the crossings, gone when it exits
     const scanAge = now - state.scan.t0;
     if (scanAge >= 0 && scanAge < 900) {
       const p = scanAge / 900;
       state.scan.mesh.visible = true;
-      state.scan.mesh.position.set(state.scan.x, 25.5 - 13 * p, 0);
+      state.scan.mesh.position.set(state.scan.x, 26 - 11 * p, 0);
       state.scan.mesh.material.opacity = 0.9 * Math.sin(p * Math.PI);
     } else {
       state.scan.mesh.visible = false;
@@ -701,6 +750,34 @@ async function main() {
       } else {
         g.mesh.material.opacity = 0.4 * (1 - age / 2200);
       }
+    }
+    // return wisps: None falls out of the exhaust and dissolves
+    for (let i = state.wisps.length - 1; i >= 0; i--) {
+      const w = state.wisps[i];
+      const age = now - w.t0;
+      if (age > 1600) {
+        scene.remove(w.mesh);
+        w.mesh.material.dispose();
+        state.wisps.splice(i, 1);
+      } else {
+        const p = age / 1600;
+        w.mesh.position.set(w.x, 15.5 - 7 * p, 0);
+        w.mesh.material.opacity = 0.8 * (1 - p);
+      }
+    }
+    // chambers: alive while called, grown on arrival, aperture flashing
+    // while scanning
+    for (const chamber of state.chambers.values()) {
+      if (chamber.born !== undefined) {
+        const age = now - chamber.born;
+        const s = Math.min(1, age / 700);
+        chamber.group.scale.setScalar(0.01 + 0.99 * (1 - Math.pow(1 - s, 3)));
+        if (s >= 1) delete chamber.born;
+      }
+      chamber.body.material.opacity =
+        (now < chamber.until) ? 0.7 : 0.35;
+      chamber.aperture.material.emissive.setHex(
+        (chamber.scanning && now < chamber.scanning) ? 0x2d8f5f : 0x1c2830);
     }
     if (state.cone.visible && state.cone.userData.until
         && now > state.cone.userData.until) {
