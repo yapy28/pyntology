@@ -114,6 +114,24 @@ def main():
     print(f"  w3schools: {ok} pages present, {missing} missing (404s "
           f"are reported above; slugs shift as w3schools reorganizes)")
 
+    # 3. prior art: the Python Tutor design doc (its public "docs,
+    #    unsupported features, and FAQ" document)
+    pa = RAW / "prior-art"
+    pa.mkdir(parents=True, exist_ok=True)
+    okpa = 0
+    for name, url in [
+        ("pythontutor-design.txt",
+         "https://docs.google.com/document/d/"
+         "13_Bc-l2FKMgwPx4dZb0sv7eMfYMHhRVgBRShha8kgbU/export?format=txt"),
+        ("pythontutor-landing.html", "https://pythontutor.com/"),
+    ]:
+        dest = pa / name
+        if not dest.exists() or dest.stat().st_size < 500:
+            okpa += 1 if fetch(url, dest) else 0
+        else:
+            okpa += 1
+    print(f"  prior art: {okpa}/2 documents present")
+
     print("library ready under sources/raw/ - read before every definition")
     return 0
 
